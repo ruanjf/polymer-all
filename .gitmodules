@@ -14,3 +14,6 @@
 	path = more-elements
 	url = https://github.com/Polymer/more-elements.git
 	branch = master
+[submodule "polymer"]
+	path = polymer
+	url = https://github.com/Polymer/polymer.git
