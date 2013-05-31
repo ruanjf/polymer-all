@@ -7,9 +7,6 @@
 [submodule "polymer-ui-elements"]
 	path = polymer-ui-elements
 	url = https://github.com/Polymer/polymer-ui-elements
-[submodule "polymer"]
-	path = polymer
-	url = https://github.com/Polymer/polymer
 [submodule "polymer-elements"]
 	path = polymer-elements
 	url = https://github.com/Polymer/polymer-elements
