@@ -38,3 +38,6 @@
 [submodule "WebAnimations"]
 	path = WebAnimations
 	url = git://github.com/web-animations/web-animations-js.git
+[submodule "PointerEvents"]
+	path = PointerEvents
+	url = https://github.com/Polymer/PointerEvents.git
