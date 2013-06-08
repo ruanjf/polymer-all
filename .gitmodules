@@ -35,9 +35,9 @@
 [submodule "PointerGestures"]
 	path = PointerGestures
 	url = https://github.com/Polymer/PointerGestures.git
-[submodule "WebAnimations"]
-	path = WebAnimations
-	url = git://github.com/web-animations/web-animations-js.git
 [submodule "PointerEvents"]
 	path = PointerEvents
 	url = https://github.com/Polymer/PointerEvents.git
+[submodule "web-animations-js"]
+	path = web-animations-js
+	url = https://github.com/web-animations/web-animations-js.git
