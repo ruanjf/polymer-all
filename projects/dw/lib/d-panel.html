@@ -1,0 +1,43 @@
+<element name="d-panel">
+  <template>
+    <style>
+      @host {
+        * {
+          /*border: 2px solid silver;*/
+          min-width: '{{width}}px';
+          min-height: '{{height}}px';
+          background-color: 'whitesmoke';
+          width: '{{width}}px';
+          height: '{{height}}px';
+        }
+        
+        /**:hover {
+          background-position: 0 -44px;
+        }
+        
+        *.selected {
+          background-position: 0 -88px;
+        }
+        
+        *:active, *.selected:active {
+          background-position: 0 -132px;
+        }*/
+      }
+    </style>
+    <content></content>
+  </template>
+  <script>
+    Polymer.register(this, {
+      message: "Hello!",
+      width: 300,
+      height: 300,
+      ready: function() {
+        // component is ready now. Let's do stuff.
+        //alert(this.message);
+        //this.style.minWidth = 500;
+        //this.style.minHeight = 500;
+        console.log(this.style.height);
+      }
+    });
+  </script>
+</element>
