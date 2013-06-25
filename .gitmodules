@@ -7,9 +7,6 @@
 [submodule "polymer-ui-elements"]
 	path = polymer-ui-elements
 	url = https://github.com/Polymer/polymer-ui-elements
-[submodule "polymer"]
-	path = polymer
-	url = https://github.com/Polymer/polymer
 [submodule "polymer-elements"]
 	path = polymer-elements
 	url = https://github.com/Polymer/polymer-elements
@@ -17,3 +14,30 @@
 	path = more-elements
 	url = https://github.com/Polymer/more-elements.git
 	branch = master
+[submodule "polymer"]
+	path = polymer
+	url = https://github.com/Polymer/polymer.git
+[submodule "platform"]
+	path = platform
+	url = https://github.com/Polymer/platform.git
+[submodule "CustomElements"]
+	path = CustomElements
+	url = https://github.com/Polymer/CustomElements.git
+[submodule "HTMLImports"]
+	path = HTMLImports
+	url = https://github.com/Polymer/HTMLImports.git
+[submodule "mdv"]
+	path = mdv
+	url = https://github.com/Polymer/mdv.git
+[submodule "ShadowDOM"]
+	path = ShadowDOM
+	url = https://github.com/Polymer/ShadowDOM.git
+[submodule "PointerGestures"]
+	path = PointerGestures
+	url = https://github.com/Polymer/PointerGestures.git
+[submodule "PointerEvents"]
+	path = PointerEvents
+	url = https://github.com/Polymer/PointerEvents.git
+[submodule "web-animations-js"]
+	path = web-animations-js
+	url = https://github.com/web-animations/web-animations-js.git
