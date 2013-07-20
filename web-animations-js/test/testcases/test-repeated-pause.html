@@ -24,32 +24,31 @@ div.anim {
 
 <div id="anim" class="anim"></div>
 
-<script src="../testharness_bootstrap.js"></script>
-<script src="../../web-animations.js"></script>
+<script src="../bootstrap.js" nochecks></script>
 <script>
 "use strict";
 var player = document.timeline.play(new Animation(
-    document.getElementById("anim"), {left: ["100px", "200px"]}, 1.0));
+    document.getElementById("anim"), [{left: "100px"}, {left: "200px"}], 1.0));
 
 // Test that repeatedly setting Player.paused to true does not affect the
 // Player's currentTime.
-test_at(
-  0.1,
-  function() {
-    player.paused = true;
-    assert_equals(player.currentTime, 0.1);
+timing_test(function() {
+    at(0.1, function() {
+      player.paused = true;
+      assert_equals(player.currentTime, 0.1);
+    });
   },
   "Player.currentTime should be " +
   "unaffected by repeatedly setting Player.paused to true");
 
 // Test that repeatedly setting Player.paused to false has no effect.
-test_at(
-   0.2,
-   function() {
-       player.paused = false;
-       assert_equals(player.currentTime, 0.1);
-   },
-   "Player.currentTime should be " +
-   "unaffected by repeatedly setting Player.paused to false");
+timing_test(function() {
+    at(0.2, function() {
+      player.paused = false;
+      assert_equals(player.currentTime, 0.1);
+    });
+  },
+  "Player.currentTime should be " +
+  "unaffected by repeatedly setting Player.paused to false");
 
 </script>

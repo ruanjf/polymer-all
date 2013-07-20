@@ -16,10 +16,9 @@ limitations under the License.
 
 <!DOCTYPE html>
 <body>The shadows should slide back under the text.
-<script src="../testharness_bootstrap.js"></script>
-<script src="../../web-animations.js"></script>
+<script src="../bootstrap.js"></script>
 <script>
 "use strict";
 document.timeline.play(new Animation(document.body,
-    {'textShadow': ['100px 100px red, 0px 100px 10px red', '0px 0px']}, 2));
+    [{textShadow: '100px 100px red, 0px 100px 10px red'}, {textShadow: '0px 0px'}], 2));
 </script>

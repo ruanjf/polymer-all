@@ -16,8 +16,7 @@ limitations under the License.
 
 <!DOCTYPE html>
 <body></body>
-<script src="../testharness_bootstrap.js"></script>
-<script src="../../web-animations.js"></script>
+<script src="../bootstrap.js"></script>
 <script>
 
 var body = document.querySelector('body');
@@ -30,7 +29,7 @@ function initGroup() {
 }
 
 function toOrdering(list) {
-  return list.map(function(animation) { return animation.timing.duration; });
+  return [].map.call(list, function(animation) { return animation.specified.iterationDuration; });
 }
 
 function assert_child_order(group, list, message) {
@@ -144,17 +143,17 @@ test(function() {
   group2.append(group);
   var group3 = new SeqGroup();
   group3.append(group);
-  assert_throws(HierarchyRequestError,
+  assert_throws("HierarchyRequestError",
     function() {
       group.append(group3);
     },
     'group3 should be in hierarchy of group');
-  assert_throws(HierarchyRequestError,
+  assert_throws("HierarchyRequestError",
     function() {
       group.append(group);
     },
     'group should be in its own hierarchy');
-  assert_throws(HierarchyRequestError,
+  assert_throws("HierarchyRequestError",
     function() {
       anims[3].replace(group);
     },

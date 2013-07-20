@@ -36,25 +36,25 @@ limitations under the License.
   <div id="a" class="anim"></div>
 </div>
 
-<script src="../testharness_bootstrap.js"></script>
-<script src="../../web-animations.js"></script>
+<script src="../bootstrap.js"></script>
 <script>
 "use strict";
 
 // Run a simple animation. It should animate indefinitely.
 var anim = new Animation(document.getElementById("a"),
-    {left: ["100px", "500px"]}, {iterationCount: Infinity, duration: 1.0});
+    [{left: "100px"}, {left: "500px"}], {iterationCount: Infinity, iterationDuration: 2.0});
 document.timeline.play(anim);
 
-// After 2.5s, move it to a parallel group and run that.
-setTimeout(function() {
-  document.timeline.play(new ParGroup([anim],
-      {direction: "alternate", duration: 2.0, iterationCount: 2.0}));
-}, 2500);
+// After 3.0s, move it to a parallel group and run that.
+testharness_timeline.schedule(function() {
+    document.timeline.play(new ParGroup([anim],
+        {iterationDuration: 1.0, iterationCount: 3.0}));
+  }, 3000);
 
-// Move it to a new group and run that.
-setTimeout(function() {
-  document.timeline.play(new ParGroup([anim], {duration: 1.5}));
-}, 8000);
+// After 3.0s, move it to a parallel group and run that.
+testharness_timeline.schedule(function() {
+    document.timeline.play(new ParGroup([anim],
+        {iterationDuration: 1.5, iterationCount: 3.0}));
+  }, 8000);
 
 </script>

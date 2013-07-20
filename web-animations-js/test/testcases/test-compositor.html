@@ -32,8 +32,7 @@ limitations under the License.
   <rect class="anim" x="100px" y="10px" width="100px" height="100px"></rect>
   <rect class="anim2" x="100px" y="10px" width="100px" height="100px"></rect>
 </svg>
-<script src="../testharness_bootstrap.js"></script>
-<script src="../../web-animations.js"></script>
+<script src="../bootstrap.js"></script>
 <script>
 "use strict";
 var rect = document.querySelector(".anim")
@@ -41,25 +40,17 @@ var rect2 = document.querySelector(".anim2")
 
 var dt = document.timeline;
 
-dt.play(new Animation(rect, {x: ["0px", "400px"]}, 3));
-dt.play(new Animation(rect, {x: ["0px", "200px"], operation: 'add'},
-   {startDelay: 1, duration: 4}));
-dt.play(new Animation(rect, {x: ["0px", "200px"], operation: 'merge'},
-    {startDelay: 2, duration: 5}));
+dt.play(new Animation(rect, [{x: "0px"}, {x: "400px"}], 3));
+dt.play(new Animation(rect,
+    new KeyframeAnimationEffect([{x: "0px"}, {x: "200px"}], 'add'),
+    {startDelay: 1, iterationDuration: 4}));
 
-dt.play(new Animation(rect2,
-    {"transform": ["translate(0px, 0px)", "translate(200px, 200px)"]},
-    3));
-dt.play(new Animation(rect2,
-    {"transform": [
-      "rotate(0deg) translate(0px, 0px)",
-      "rotate(90deg) translate(100px, 0px)"
-    ], operation: 'add'},
-    {startDelay: 1, duration: 4}));
-dt.play(new Animation(rect2,
-    {"transform": [
-      "translate(0px, 0px) rotate(0deg) translate(0px, 0px) scale(1, 1)",
-      "translate(0px, 0px) rotate(0deg) translate(0px, 0px) scale(2, 2)"
-    ], operation: 'merge'},
-    {startDelay: 2, duration: 5}));
+dt.play(new Animation(rect2, [
+  {transform: "translate(0px, 0px)"},
+  {transform: "translate(200px, 200px)"},
+], 3));
+dt.play(new Animation(rect2, new KeyframeAnimationEffect([
+  {transform: "rotate(0deg) translate(0px, 0px)"},
+  {transform: "rotate(90deg) translate(100px, 0px)"},
+], 'add'), {startDelay: 1, iterationDuration: 4}));
 </script>

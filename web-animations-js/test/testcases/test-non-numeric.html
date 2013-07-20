@@ -27,11 +27,16 @@ body {
 <div id="parent" style='background:lightsteelblue'>
   <div style='background:red' id='test'></div>
 </div>
-<script src="../testharness_bootstrap.js"></script>
-<script src="../../web-animations.js"></script>
+<script src="../bootstrap.js"></script>
 <script>
 "use strict";
-document.timeline.play(new Animation(document.querySelector('#test'),
-    {'display': ['none', 'block', 'none', 'block', 'none', 'block', 'none']},
-    0.5));
+document.timeline.play(new Animation(document.querySelector('#test'), [
+  {display: 'none'},
+  {display: 'block'},
+  {display: 'none'},
+  {display: 'block'},
+  {display: 'none'},
+  {display: 'block'},
+  {display: 'none'},
+], 0.5));
 </script>

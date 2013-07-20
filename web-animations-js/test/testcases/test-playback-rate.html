@@ -87,8 +87,7 @@ limitations under the License.
 
 <div style="height: 450px"></div>
 
-<script src="../testharness_bootstrap.js"></script>
-<script src="../../web-animations.js"></script>
+<script src="../bootstrap.js"></script>
 <script>
 "use strict";
 
@@ -97,36 +96,33 @@ var containers = ["ca", "cb"];
 var directions = ["normal", "reverse"];
 var groups = [];
 
+var effect100To300 = [{left: "100px"}, {left: "300px"}];
+var effect300To100 = [{left: "300px"}, {left: "100px"}];
+
 for (var i = 0; i < directions.length; i++) {
   var dir = directions[i];
-  groups.push(new ParGroup([], {direction: dir, duration: 3}));
+  groups.push(new ParGroup([], {direction: dir, iterationDuration: 3}));
 }
 
 for (var i = 0; i < containers.length; i++) {
   var container = document.getElementById(containers[i]);
   // Test basic use.
-  new Animation(container.getElementsByClassName("a")[0],
-      {left: ["100px", "300px"]}, {duration: 1.0}, groups[i]);
-  new Animation(container.getElementsByClassName("b")[0],
-      {left: ["100px", "300px"]}, {duration: 0.5, playbackRate: 0.5},
-      groups[i]);
-  new Animation(container.getElementsByClassName("c")[0],
-      {left: ["100px", "300px"]}, {duration: 2.0, playbackRate: 2.0},
-      groups[i]);
+  groups[i].append(new Animation(container.getElementsByClassName("a")[0],
+      effect100To300, {iterationDuration: 1.0}, groups[i]));
+  groups[i].append(new Animation(container.getElementsByClassName("b")[0],
+      effect100To300, {iterationDuration: 0.5, playbackRate: 0.5}));
+  groups[i].append(new Animation(container.getElementsByClassName("c")[0],
+      effect100To300, {iterationDuration: 2.0, playbackRate: 2.0}));
    // Test negative values.
-  new Animation(container.getElementsByClassName("d")[0],
-      {left: ["300px", "100px"]}, {duration: 1.0, playbackRate: -1.0},
-      groups[i]);
-  new Animation(container.getElementsByClassName("e")[0],
-      {left: ["300px", "100px"]}, {duration: 0.5, playbackRate: -0.5},
-      groups[i]);
-  new Animation(container.getElementsByClassName("f")[0],
-      {left: ["300px", "100px"]}, {duration: 2.0, playbackRate: -2.0},
-      groups[i]);
+  groups[i].append(new Animation(container.getElementsByClassName("d")[0],
+      effect300To100, {iterationDuration: 1.0, playbackRate: -1.0}));
+  groups[i].append(new Animation(container.getElementsByClassName("e")[0],
+      effect300To100, {iterationDuration: 0.5, playbackRate: -0.5}));
+  groups[i].append(new Animation(container.getElementsByClassName("f")[0],
+      effect300To100, {iterationDuration: 2.0, playbackRate: -2.0}));
    // Test zero.
-  new Animation(container.getElementsByClassName("g")[0],
-      {left: ["300px", "100px"]}, {duration: 1.0, playbackRate: 0.0},
-      groups[i]);
+  groups[i].append(new Animation(container.getElementsByClassName("g")[0],
+      effect300To100, {iterationDuration: 1.0, playbackRate: 0.0}));
   document.timeline.play(groups[i]);
 }
 </script>

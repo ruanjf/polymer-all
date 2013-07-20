@@ -58,20 +58,19 @@ for (var start in states) {
 }
 
 </script>
-<script src="../testharness_bootstrap.js"></script>
-<script src="../../web-animations.js"></script>
+<script src="../bootstrap.js"></script>
 <script>
 "use strict";
-var timing = {duration: 0.5, timingFunction: 'steps(2, end)'};
+var timing = {iterationDuration: 0.5, timingFunction: 'steps(2, end)'};
 
 // Add the animations
 var animations = [];
 for (var start in states) {
   for (var end in states) {
-    var frames = [start, end];
+    var effect = [{visibility: start}, {visibility: end}];
     var testElement = document.getElementById(start + "_" + end);
     animations.push(
-        new Animation(testElement, {visibility: frames}, timing));
+        new Animation(testElement, effect, timing));
   }
 }
 </script>

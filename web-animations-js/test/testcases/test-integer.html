@@ -27,8 +27,7 @@ position:absolute;
 </style>
 <body>
 <div id="test"></div>
-<script src="../testharness_bootstrap.js"></script>
-<script src="../../web-animations.js"></script>
+<script src="../bootstrap.js"></script>
 <script>
 "use strict";
 var width = 25;
@@ -49,5 +48,5 @@ for (var i = 0; i < totalWidth; i += width) {
   document.body.insertBefore(div, marker);
 }
 document.timeline.play(new Animation(document.querySelector("#test"),
-    {"zIndex": [String(startZ), String(endZ)]}, 3));
+    [{zIndex: String(startZ)}, {zIndex: String(endZ)}], 3));
 </script>

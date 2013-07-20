@@ -116,8 +116,7 @@ limitations under the License.
 
 <div style="height: 700px"></div>
 
-<script src="../testharness_bootstrap.js"></script>
-<script src="../../web-animations.js"></script>
+<script src="../bootstrap.js"></script>
 <script>
 "use strict";
 
@@ -131,7 +130,7 @@ for (var i = 0; i < directions.length; i++) {
   var dir = directions[i];
   groups.push(new ParGroup([], {
     startDelay: 1,
-    duration: 8,
+    iterationDuration: 8,
     iterationCount: 3,
     playbackRate: 2,
     direction: dir,
@@ -145,20 +144,20 @@ function sampleFunc(timeFraction, iteration, target) {
 for (var i = 0; i < fillModes.length; i++) {
   var divs = document.querySelectorAll(categories[i]);
   for (var j = 0; j < divs.length; j++) {
-    new Animation(divs[j], {left: ["100px", "200px"]}, {
+    groups[j].append(new Animation(divs[j], [{left: "100px"}, {left: "200px"}], {
       startDelay: 1,
-      duration: 1,
+      iterationDuration: 1,
       iterationCount: 2,
       fillMode: fillModes[i],
       playbackRate: 0.8
-    }, groups[j]);
-    new Animation(divs[j], {sample: sampleFunc}, {
+    }));
+    groups[j].append(new Animation(divs[j], {sample: sampleFunc}, {
       startDelay: 1,
-      duration: 1,
+      iterationDuration: 1,
       iterationCount: 2,
       fillMode: fillModes[i],
       playbackRate: 0.8
-    }, groups[j]);
+    }));
   }
 }
 for (var j = 0; j < divs.length; j++) {

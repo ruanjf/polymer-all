@@ -34,6 +34,20 @@ function assertNoChanges() {
   assert.isUndefined(callbackArgs);
 }
 
+var createObject = ('__proto__' in {}) ?
+  function(obj) { return obj; } :
+  function(obj) {
+    var proto = obj.__proto__;
+    if (!proto)
+      return obj;
+    var newObject = Object.create(proto);
+    Object.getOwnPropertyNames(obj).forEach(function(name) {
+      Object.defineProperty(newObject, name,
+                           Object.getOwnPropertyDescriptor(obj, name));
+    });
+    return newObject;
+  };
+
 suite('Basic Tests', function() {
 
   test('Exception Doesnt Stop Notification', function() {
@@ -116,6 +130,32 @@ suite('PathObserver Tests', function() {
     callbackArgs = undefined;
     callbackInvoked = false;
   }
+
+  test('Close Invokes Unobserved', function() {
+    var called = false;
+    var obj = { foo: 1, unobserved: function() { called = true }};
+    var observer = new PathObserver(obj, 'foo', function() {});
+    observer.close();
+    assert.isTrue(called);
+  });
+
+  test('Optional target for callback', function() {
+    var returnedToken;
+    var target = {
+      changed: function(value, oldValue, token) {
+        this.called = true;
+        returnedToken = token;
+      }
+    };
+    var obj = { foo: 1 };
+    var observer = new PathObserver(obj, 'foo', target.changed, target, 'token');
+    obj.foo = 2;
+    observer.deliver();
+    assert.isTrue(target.called);
+    assert.strictEqual('token', returnedToken)
+
+    observer.close();
+  });
 
   test('Delivery Until No Changes', function() {
     var obj = { foo: { bar: 5 }};
@@ -362,11 +402,11 @@ suite('PathObserver Tests', function() {
   });
 
   test('Path Set To Same As Prototype', function() {
-    var model = {
+    var model = createObject({
       __proto__: {
         id: 1
       }
-    };
+    });
 
     observer = new PathObserver(model, 'id', callback);
     model.id = 1;
@@ -391,11 +431,11 @@ suite('PathObserver Tests', function() {
   });
 
   test('Path Set Shadows', function() {
-    var model = {
+    var model = createObject({
       __proto__: {
         x: 1
       }
-    };
+    });
 
     observer = new PathObserver(model, 'x', callback);
     model.x = 2;
@@ -404,12 +444,12 @@ suite('PathObserver Tests', function() {
   });
 
   test('Delete With Same Value On Prototype', function() {
-    var model = {
+    var model = createObject({
       __proto__: {
         x: 1,
       },
       x: 1
-    };
+    });
 
     observer = new PathObserver(model, 'x', callback);
     delete model.x;
@@ -418,12 +458,12 @@ suite('PathObserver Tests', function() {
   });
 
   test('Delete With Different Value On Prototype', function() {
-    var model = {
+    var model = createObject({
       __proto__: {
         x: 1,
       },
       x: 2
-    };
+    });
 
     observer = new PathObserver(model, 'x', callback);
     delete model.x;
@@ -435,9 +475,9 @@ suite('PathObserver Tests', function() {
     var proto = {
       x: 1
     }
-    var model = {
+    var model = createObject({
       __proto__: proto
-    };
+    });
 
     observer = new PathObserver(model, 'x', callback);
     model.x = 2;
@@ -579,7 +619,8 @@ suite('PathObserver Tests', function() {
     assert.strictEqual(9, target.computed);
 
     observer.close();
-    assert.isFalse(target.hasOwnProperty('computed'));
+    assert.isTrue(target.hasOwnProperty('computed'));
+    assert.strictEqual(9, target.computed);
 
     if (!changeRecords)
       return;
@@ -714,6 +755,32 @@ suite('ArrayObserver Tests', function() {
     applySplicesAndAssertDeepEqual(arr, copy);
     observer.close();
   }
+
+  test('Close Invokes Unobserved', function() {
+    var called = false;
+    var obj = [];
+    obj.unobserved = function() { called = true };
+    var observer = new ArrayObserver(obj, function() {});
+    observer.close();
+    assert.isTrue(called);
+  });
+
+  test('Optional target for callback', function() {
+    var returnedToken;
+    var target = {
+      changed: function(splices, token) {
+        this.called = true;
+        returnedToken = token;
+      }
+    };
+    var obj = [];
+    var observer = new ArrayObserver(obj, target.changed, target, 'token');
+    obj.length = 1;
+    observer.deliver();
+    assert.isTrue(target.called);
+    assert.strictEqual('token', returnedToken);
+    observer.close();
+  });
 
   test('Delivery Until No Changes', function() {
     var arr = [0, 1, 2, 3, 4];
@@ -1199,7 +1266,6 @@ suite('ArrayObserver Tests', function() {
     console.log('Fuzzing spliceProjection ' + testCount +
                 ' passes with ' + ArrayFuzzer.operationCount + ' operations each.');
 
-    console.time('fuzzer');
     for (var i = 0; i < testCount; i++) {
       console.log('pass: ' + i);
       var fuzzer = new ArrayFuzzer();
@@ -1208,7 +1274,6 @@ suite('ArrayObserver Tests', function() {
       ensureNonSparse(fuzzer.copy);
       assert.deepEqual(fuzzer.arr, fuzzer.copy);
     }
-    console.timeEnd('fuzzer');
   });
 
   test('Array Tracker No Proxies Edits', function() {
@@ -1269,6 +1334,51 @@ suite('ObjectObserver Tests', function() {
     callbackArgs = undefined;
     callbackInvoked = false;
   }
+
+  test('Close Invokes Unobserved', function() {
+    var called = false;
+    var obj = {};
+    obj.unobserved = function() { called = true };
+    var observer = new ObjectObserver(obj, function() {});
+    observer.close();
+    assert.isTrue(called);
+  });
+
+  test('Optional target for callback', function() {
+    var returnedToken;
+    var target = {
+      changed: function(value, oldValue, token) {
+        this.called = true;
+        returnedToken = token;
+      }
+    };
+    var obj = { foo: 1 };
+    var observer = new PathObserver(obj, 'foo', target.changed, target, 'token');
+    obj.foo = 2;
+    observer.deliver();
+    assert.isTrue(target.called);
+    assert.strictEqual('token', returnedToken)
+
+    observer.close();
+  });
+
+  test('Optional target for callback', function() {
+    var returnedToken;
+    var target = {
+      changed: function(added, removed, changed, oldValues, token) {
+        this.called = true;
+        returnedToken = token;
+      }
+    };
+    var obj = {};
+    var observer = new ObjectObserver(obj, target.changed, target, 'token');
+    obj.foo = 1;
+    observer.deliver();
+    assert.isTrue(target.called);
+    assert.strictEqual('token', returnedToken)
+
+    observer.close();
+  });
 
   test('Delivery Until No Changes', function() {
     var obj = { foo: 5 };

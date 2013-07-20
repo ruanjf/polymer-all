@@ -52,8 +52,8 @@ var createObject = function(proto, obj) {
   return newObject;
 };
 
-var strip = function(str) {
-  return str.replace(/^\s+/, '').replace(/\s+$/, '');
+var abstractMethod = function() {
+  throw "Abstract method not implemented.";
 };
 
 var IndexSizeError = function(message) {
@@ -64,82 +64,67 @@ var IndexSizeError = function(message) {
 
 IndexSizeError.prototype = Object.create(Error.prototype);
 
-var HierarchyRequestError = function(message) {
-  Error.call(this);
-  this.name = 'HierarchyRequestError';
-  this.message = message;
+/** @constructor */
+var TimingDict = function(timingInput) {
+  if (typeof timingInput == 'object') {
+    for (var k in timingInput) {
+      if (k in TimingDict.prototype) {
+        this[k] = timingInput[k];
+      }
+    }
+  } else if (isDefinedAndNotNull(timingInput)) {
+    this.iterationDuration = Number(timingInput);
+  }
+};
+
+TimingDict.prototype = {
+  startDelay: 0,
+  fillMode: 'forwards',
+  iterationStart: 0,
+  iterationCount: 1,
+  iterationDuration: 'auto',
+  activeDuration: 'auto',
+  playbackRate: 1,
+  direction: 'normal',
+  timingFunction: 'linear',
 }
 
-HierarchyRequestError.prototype = Object.create(Error.prototype);
-
 /** @constructor */
-var Timing = function(timingDict) {
-  this.startDelay = timingDict.startDelay || 0.0;
-  this.duration = timingDict.duration;
-  if (this.duration < 0.0) {
-    throw new IndexSizeError('duration must be >= 0');
+var Timing = function(token, timingInput, changeHandler) {
+  if (token !== constructorToken) {
+    throw new TypeError('Illegal constructor');
   }
-  this.iterationCount = isDefined(timingDict.iterationCount) ?
-      timingDict.iterationCount : 1.0;
-  if (this.iterationCount < 0.0) {
-    throw new IndexSizeError('iterationCount must be >= 0');
-  }
-  this.iterationStart = timingDict.iterationStart || 0.0;
-  if (this.iterationStart < 0.0) {
-    throw new IndexSizeError('iterationStart must be >= 0');
-  }
-  this.playbackRate = isDefined(timingDict.playbackRate) ?
-      timingDict.playbackRate : 1.0;
-  //this.playbackRate = timingDict.playbackRate || 1.0;
-  this.direction = timingDict.direction || 'normal';
-  if (typeof timingDict.timingFunction === 'string') {
-    this.timingFunction =
-        TimingFunction.createFromString(timingDict.timingFunction);
-  } else {
-    this.timingFunction = timingDict.timingFunction;
-  }
-  this.fillMode = timingDict.fillMode || 'forwards';
+  this._dict = new TimingDict(timingInput);
+  this._changeHandler = changeHandler;
 };
 
 Timing.prototype = {
-  // TODO: Is this supposed to be public?
-  clone: function() {
-    return new Timing({
-      startDelay: this.startDelay,
-      duration: this.duration,
-      iterationCount: this.iterationCount,
-      iterationStart: this.iterationStart,
-      playbackRate: this.playbackRate,
-      direction: this.direction,
-      timingFunction: this.timingFunction ? this.timingFunction.clone() : null,
-      fillMode: this.fillMode
-    });
-  }
-};
-
-/** @constructor */
-var TimingProxy = function(timing, setter) {
-  this._timing = timing;
-  this._setter = setter;
-};
-
-TimingProxy.prototype = {
-  extractMutableTiming: function() {
-    return new Timing({
-      startDelay: this._timing.startDelay,
-      duration: this._timing.duration,
-      iterationCount: this._timing.iterationCount,
-      iterationStart: this._timing.iterationStart,
-      playbackRate: this._timing.playbackRate,
-      direction: this._timing.direction,
-      timingFunction: this._timing.timingFunction ?
-                  this._timing.timingFunction.clone() : null,
-      fillMode: this._timing.fillMode
-    });
+  _timingFunction: function(timedItem) {
+    var timingFunction = TimingFunction.createFromString(
+        this.timingFunction, timedItem);
+    this._timingFunction = function() {
+      return timingFunction;
+    };
+    return timingFunction;
   },
-  clone: function() {
-    return this._timing.clone();
-  }
+  _invalidateTimingFunction: function() {
+    delete this._timingFunction;
+  },
+  _iterationCount: function() {
+    var value = this._dict.iterationCount;
+    return value < 0 ? 1 : value;
+  },
+  _iterationDuration: function() {
+    var value = this._dict.iterationDuration;
+    return typeof value == 'number' ? value : 'auto';
+  },
+  _activeDuration: function() {
+    var value = this._dict.activeDuration;
+    return typeof value == 'number' ? value : 'auto';
+  },
+  _clone: function() {
+    return new Timing(constructorToken, this._dict, this._updateInternalState.bind(this));
+  },
 };
 
 // Configures an accessor descriptor for use with Object.defineProperty() to
@@ -151,24 +136,31 @@ var configureDescriptor = function(descriptor) {
   return descriptor;
 };
 
-['startDelay', 'duration', 'iterationCount', 'iterationStart', 'playbackRate',
-    'direction', 'timingFunction', 'fillMode'].forEach(function(s) {
-  Object.defineProperty(TimingProxy.prototype, s, configureDescriptor({
+Timing._defineProperty = function(prop) {
+  Object.defineProperty(Timing.prototype, prop, configureDescriptor({
     get: function() {
-      return this._timing[s];
+      return this._dict[prop];
     },
-    set: function(v) {
-      var old = this._timing[s];
-      this._timing[s] = v;
-      try {
-        this._setter(v);
-      } catch (e) {
-        this._timing[s] = old;
-        throw e;
+    set: function(value) {
+      if (isDefinedAndNotNull(value)) {
+        this._dict[prop] = value;
+      } else {
+        delete this._dict[prop];
       }
-    },
+      // FIXME: probably need to implement specialized handling parsing
+      // for each property
+      if (prop == 'timingFunction') {
+        // Cached timing function may be invalid now.
+        delete this._timingFunction;
+      }
+      this._changeHandler();
+    }
   }));
-});
+};
+
+for (var prop in TimingDict.prototype) {
+  Timing._defineProperty(prop);
+}
 
 var isDefined = function(val) {
   return typeof val !== 'undefined';
@@ -184,11 +176,24 @@ var Timeline = function(token) {
   if (token !== constructorToken) {
     throw new TypeError('Illegal constructor');
   }
+  // TODO: This will probably need to change.
+  this._startTime = documentTimeZeroAsClockTime;
+  if (this._startTime !== undefined) {
+    this._startTime /= 1000;
+  }
 };
 
 Timeline.prototype = {
   get currentTime() {
-    return documentTime();
+    if (this._startTime === undefined) {
+      this._startTime = documentTimeZeroAsClockTime;
+      if (this._startTime === undefined) {
+        return null;
+      } else {
+        this._startTime /= 1000;
+      }
+    }
+    return relativeTime(cachedClockTime(), this._startTime);
   },
   play: function(source) {
     return new Player(constructorToken, source, this);
@@ -196,6 +201,18 @@ Timeline.prototype = {
   getCurrentPlayers: function() {
     return PLAYERS.filter(function(player) {
       return !player._isPastEndOfActiveInterval();
+    });
+  },
+  toTimelineTime: function(otherTime, other) {
+    if ((this.currentTime === null) || (other.currentTime === null)) {
+      return null;
+    }
+    else return (otherTime + other._startTime - this._startTime);
+  },
+  _pauseAnimationsForTesting: function(pauseAt) {
+    PLAYERS.forEach(function(player) {
+      player.paused = true;
+      player.currentTime = pauseAt;
     });
   },
 };
@@ -214,8 +231,11 @@ var Player = function(token, source, timeline) {
   this._timeDrift = 0.0;
   this._pauseTime = undefined;
   this._playbackRate = 1.0;
+  this._hasTicked = false;
 
   this.source = source;
+  this._checkForHandlers();
+  this._lastCurrentTime = undefined;
 
   PLAYERS.push(this);
   maybeRestartAnimation();
@@ -223,17 +243,23 @@ var Player = function(token, source, timeline) {
 
 Player.prototype = {
   set source(source) {
-    if (isDefinedAndNotNull(this.source)) {
-      // To prevent infinite recursion.
-      var oldTimedItem = this.source;
-      this._source = null;
-      oldTimedItem._attach(null);
-    }
-    this._source = source;
-    if (isDefinedAndNotNull(this.source)) {
-      this.source._attach(this);
-      this._update();
-      maybeRestartAnimation();
+    enterModifyCurrentAnimationState();
+    try {
+      if (isDefinedAndNotNull(this.source)) {
+        // To prevent infinite recursion.
+        var oldTimedItem = this.source;
+        this._source = null;
+        oldTimedItem._attach(null);
+      }
+      this._source = source;
+      if (isDefinedAndNotNull(this.source)) {
+        this.source._attach(this);
+        this._update();
+        maybeRestartAnimation();
+      }
+      this._checkForHandlers();
+    } finally {
+      exitModifyCurrentAnimationState(this._hasTicked);
     }
   },
   get source() {
@@ -241,7 +267,13 @@ Player.prototype = {
   },
   // This is the effective current time.
   set currentTime(currentTime) {
-    this._currentTime = currentTime;
+    enterModifyCurrentAnimationState();
+    try {
+      this._currentTime = currentTime;
+    } finally {
+      exitModifyCurrentAnimationState(
+          this._hasTicked || this.startTime + this._timeDrift <= lastTickTime);
+    }
   },
   get currentTime() {
     return this._currentTime === null ? 0 : this._currentTime;
@@ -267,11 +299,17 @@ Player.prototype = {
         this._timeDrift;
   },
   set startTime(startTime) {
-    // This seeks by updating _startTime and hence the currentTime. It does not
-    // affect _drift.
-    this._startTime = startTime;
-    this._update();
-    maybeRestartAnimation();
+    enterModifyCurrentAnimationState();
+    try {
+      // This seeks by updating _startTime and hence the currentTime. It does not
+      // affect _drift.
+      this._startTime = startTime;
+      this._update();
+      maybeRestartAnimation();
+    } finally {
+      exitModifyCurrentAnimationState(
+          this._hasTicked || this.startTime + this._timeDrift <= lastTickTime);
+    }
   },
   get startTime() {
     return this._startTime;
@@ -293,10 +331,15 @@ Player.prototype = {
     return this._timeline;
   },
   set playbackRate(playbackRate) {
-    var cachedCurrentTime = this.currentTime;
-    // This will impact currentTime, so perform a compensatory seek.
-    this._playbackRate = playbackRate;
-    this.currentTime = cachedCurrentTime;
+    enterModifyCurrentAnimationState();
+    try {
+      var cachedCurrentTime = this.currentTime;
+      // This will impact currentTime, so perform a compensatory seek.
+      this._playbackRate = playbackRate;
+      this.currentTime = cachedCurrentTime;
+    } finally {
+      exitModifyCurrentAnimationState(this._hasTicked);
+    }
   },
   get playbackRate() {
     return this._playbackRate;
@@ -310,43 +353,58 @@ Player.prototype = {
     return this.source === null ||
         this.source._isPastEndOfActiveInterval();
   },
+  _isCurrent: function() {
+    return this.source && this.source._isCurrent();
+  },
   _getLeafItemsInEffect: function(items) {
     if (this.source) {
       this.source._getLeafItemsInEffect(items);
     }
   },
+  _isTargetingElement: function(element) {
+    return this.source && this.source._isTargetingElement(element);
+  },
+  _getAnimationsTargetingElement: function(element, animations) {
+    if (this.source) {
+      this.source._getAnimationsTargetingElement(element, animations);
+    }
+  },
+  _handlerAdded: function() {
+    this._needsHandlerPass = true;
+  },
+  _checkForHandlers: function() {
+    this._needsHandlerPass = this.source !== null && this.source._hasHandler();
+  },
+  _generateEvents: function() {
+    if (!isDefinedAndNotNull(this._lastCurrentTime)) {
+      this._lastCurrentTime = this._startTime;
+    }
+
+    if (this._needsHandlerPass) {
+      var timeDelta = this._currentTime - this._lastCurrentTime;
+      if (timeDelta > 0) {
+        this.source._generateEvents(this._lastCurrentTime, this._currentTime, this.timeline.currentTime, 1);
+      }
+    }
+
+    this._lastCurrentTime = this._currentTime;
+  },
 };
 
 
 /** @constructor */
-var TimedItem = function(token, timing, parentGroup) {
+var TimedItem = function(token, timingInput) {
   if (token !== constructorToken) {
     throw new TypeError('Illegal constructor');
   }
-  this.timing = new TimingProxy(interpretTimingParam(timing), function() {
-    this._updateInternalState();
-  }.bind(this));
+  this.specified = new Timing(constructorToken, timingInput, this._specifiedTimingModified.bind(this));
   this._inheritedTime = null;
   this.currentIteration = null;
-  this.iterationTime = null;
-  this.animationTime = null;
+  this._iterationTime = null;
+  this._animationTime = null;
   this._startTime = 0.0;
-
-  // A TimedItem has either a _player, or a _parentGroup, or neither, but
-  // never both.
   this._player = null;
-
-  // Note that we don't use the public setter, because we call _addInternal()
-  // below.
-  if (parentGroup === this) {
-    throw new Error('parentGroup can not be set to self!');
-  }
-  this._parentGroup = this._sanitizeParent(parentGroup);
-
-  if (this.parentGroup) {
-    // This will set our inheritedTime via _childrenStateModified().
-    this.parentGroup._addInternal(this);
-  }
+  this._parent = null;
   this._updateInternalState();
 };
 
@@ -355,8 +413,8 @@ TimedItem.prototype = {
   // call sites to instead rely on a call from the parent.
   get _effectiveParentTime() {
     return
-        this.parentGroup !== null && this.parentGroup.iterationTime !== null ?
-        this.parentGroup.iterationTime : 0;
+        this.parent !== null && this.parent._iterationTime !== null ?
+        this.parent._iterationTime : 0;
   },
   get localTime() {
     return this._inheritedTime === null ?
@@ -365,31 +423,25 @@ TimedItem.prototype = {
   get startTime() {
     return this._startTime;
   },
-  set duration(duration) {
-    this._duration = duration;
-    this._updateInternalState();
+  get iterationDuration() {
+    var result = this.specified._iterationDuration();
+    if (result == 'auto')
+        result = this._intrinsicDuration();
+    return result;
   },
-  get duration() {
-    return isDefined(this._duration) ?
-        this._duration : (isDefined(this.timing.duration) ?
-            this.timing.duration : this._intrinsicDuration());
-  },
-  set animationDuration(animationDuration) {
-    this._animationDuration = animationDuration;
-    this._updateInternalState();
-  },
-  get animationDuration() {
-    if (isDefined(this._animationDuration)) {
-      return this._animationDuration;
+  get activeDuration() {
+    var result = this.specified._activeDuration();
+    if (result == 'auto') {
+      var repeatedDuration = this.iterationDuration * this.specified._iterationCount();
+      result = repeatedDuration / Math.abs(this.specified.playbackRate);
     }
-    var repeatedDuration = this.duration * this.timing.iterationCount;
-    return repeatedDuration / Math.abs(this.timing.playbackRate);
+    return result;
   },
   get endTime() {
-    return this._startTime + this.animationDuration + this.timing.startDelay;
+    return this._startTime + this.activeDuration + this.specified.startDelay;
   },
-  get parentGroup() {
-    return this._parentGroup;
+  get parent() {
+    return this._parent;
   },
   _attach: function(player) {
     // Remove ourselves from our parent, if we have one. This also removes any
@@ -397,49 +449,54 @@ TimedItem.prototype = {
     this._reparent(null);
     this._player = player;
   },
-  _sanitizeParent: function(parentGroup) {
-    if (parentGroup === null || parentGroup instanceof TimingGroup) {
-      return parentGroup;
-    } else if (!isDefined(parentGroup)) {
-      return null;
-    }
-    throw new TypeError('parentGroup is not a TimingGroup');
-  },
   // Takes care of updating the outgoing parent. This is called with a non-null
   // parent only from TimingGroup.splice(), which takes care of calling
   // TimingGroup._childrenStateModified() for the new parent.
-  _reparent: function(parentGroup) {
-    if (parentGroup === this) {
-      throw new Error('parentGroup can not be set to self!');
+  _reparent: function(parent) {
+    if (parent === this) {
+      throw new Error('parent can not be set to self!');
     }
-    if (this._player !== null) {
-      this._player.source = null;
-      this._player = null;
+    enterModifyCurrentAnimationState();
+    try {
+      if (this._player !== null) {
+        this._player.source = null;
+        this._player = null;
+      }
+      if (this.parent !== null) {
+        this.remove();
+      }
+      this._parent = parent;
+      // In the case of a SeqGroup parent, _startTime will be updated by
+      // TimingGroup.splice().
+      if (this.parent === null || this.parent.type !== 'seq') {
+        this._startTime =
+            this._stashedStartTime === undefined ? 0.0 : this._stashedStartTime;
+        this._stashedStartTime = undefined;
+      }
+      // In the case of the parent being non-null, _childrenStateModified() will
+      // call this via _updateChildInheritedTimes().
+      // TODO: Consider optimising this case by skipping this call.
+      this._updateTimeMarkers();
+    } finally {
+      exitModifyCurrentAnimationState(Boolean(this.player) && this.player._hasTicked);
     }
-    if (this.parentGroup !== null) {
-      this.remove();
-    }
-    this._parentGroup = parentGroup;
-    // In the case of a SeqGroup parent, _startTime will be updated by
-    // TimingGroup.splice().
-    if (this.parentGroup === null || this.parentGroup.type !== 'seq') {
-      this._startTime =
-          this._stashedStartTime === undefined ? 0.0 : this._stashedStartTime;
-      this._stashedStartTime = undefined;
-    }
-    // In the case of the parent being non-null, _childrenStateModified() will
-    // call this via _updateChildInheritedTimes().
-    // TODO: Consider optimising this case by skipping this call.
-    this._updateTimeMarkers();
   },
   _intrinsicDuration: function() {
     return 0.0;
   },
   _updateInternalState: function() {
-    if (this.parentGroup) {
-      this.parentGroup._childrenStateModified();
+    if (this.parent) {
+      this.parent._childrenStateModified();
     }
     this._updateTimeMarkers();
+  },
+  _specifiedTimingModified: function() {
+    enterModifyCurrentAnimationState();
+    try {
+      this._updateInternalState();
+    } finally {
+      exitModifyCurrentAnimationState(Boolean(this.player) && this.player._hasTicked);
+    }
   },
   // We push time down to children. We could instead have children pull from
   // above, but this is tricky because a TimedItem may use either a parent
@@ -451,97 +508,104 @@ TimedItem.prototype = {
     this._updateTimeMarkers();
   },
   _updateAnimationTime: function() {
-    if (this.localTime < this.timing.startDelay) {
-      if (this.timing.fillMode === 'backwards' ||
-          this.timing.fillMode === 'both') {
-        this.animationTime = 0;
+    if (this.localTime < this.specified.startDelay) {
+      if (this.specified.fillMode === 'backwards' ||
+          this.specified.fillMode === 'both') {
+        this._animationTime = 0;
       } else {
-        this.animationTime = null;
+        this._animationTime = null;
       }
     } else if (this.localTime <
-        this.timing.startDelay + this.animationDuration) {
-      this.animationTime = this.localTime - this.timing.startDelay;
+        this.specified.startDelay + this.activeDuration) {
+      this._animationTime = this.localTime - this.specified.startDelay;
     } else {
-      if (this.timing.fillMode === 'forwards' ||
-          this.timing.fillMode === 'both') {
-        this.animationTime = this.animationDuration;
+      if (this.specified.fillMode === 'forwards' ||
+          this.specified.fillMode === 'both') {
+        this._animationTime = this.activeDuration;
       } else {
-        this.animationTime = null;
+        this._animationTime = null;
       }
     }
   },
   _updateIterationParamsZeroDuration: function() {
-    this.iterationTime = 0;
-    var isAtEndOfIterations = this.timing.iterationCount != 0 &&
-        this.localTime >= this.timing.startDelay;
+    this._iterationTime = 0;
+    var isAtEndOfIterations = this.specified._iterationCount() != 0 &&
+        this.localTime >= this.specified.startDelay;
     this.currentIteration = isAtEndOfIterations ?
-       this._floorWithOpenClosedRange(this.timing.iterationStart +
-           this.timing.iterationCount, 1.0) :
-       this._floorWithClosedOpenRange(this.timing.iterationStart, 1.0);
+       this._floorWithOpenClosedRange(this.specified.iterationStart +
+           this.specified._iterationCount(), 1.0) :
+       this._floorWithClosedOpenRange(this.specified.iterationStart, 1.0);
     // Equivalent to unscaledIterationTime below.
     var unscaledFraction = isAtEndOfIterations ?
-        this._modulusWithOpenClosedRange(this.timing.iterationStart +
-            this.timing.iterationCount, 1.0) :
-        this._modulusWithClosedOpenRange(this.timing.iterationStart, 1.0);
+        this._modulusWithOpenClosedRange(this.specified.iterationStart +
+            this.specified._iterationCount(), 1.0) :
+        this._modulusWithClosedOpenRange(this.specified.iterationStart, 1.0);
+    var timingFunction = this.specified._timingFunction(this);
     this._timeFraction = this._isCurrentDirectionForwards() ?
             unscaledFraction :
             1.0 - unscaledFraction;
-    if (this.timing.timingFunction) {
-      this._timeFraction = this.timing.timingFunction.scaleTime(
-          this._timeFraction);
+    console.assert(this._timeFraction >= 0.0 && this._timeFraction <= 1.0,
+        'Time fraction should be in the range [0, 1]');
+    if (timingFunction) {
+      this._timeFraction = timingFunction.scaleTime(this._timeFraction);
     }
   },
   _getAdjustedAnimationTime: function(animationTime) {
     var startOffset =
-        multiplyZeroGivesZero(this.timing.iterationStart, this.duration);
-    return (this.timing.playbackRate < 0 ?
-        (animationTime - this.animationDuration) : animationTime) *
-        this.timing.playbackRate + startOffset;
+        multiplyZeroGivesZero(this.specified.iterationStart, this.iterationDuration);
+    return (this.specified.playbackRate < 0 ?
+        (animationTime - this.activeDuration) : animationTime) *
+        this.specified.playbackRate + startOffset;
   },
   _scaleIterationTime: function(unscaledIterationTime) {
     return this._isCurrentDirectionForwards() ?
         unscaledIterationTime :
-        this.duration - unscaledIterationTime;
+        this.iterationDuration - unscaledIterationTime;
   },
   _updateIterationParams: function() {
     var adjustedAnimationTime =
-        this._getAdjustedAnimationTime(this.animationTime);
-    var repeatedDuration = this.duration * this.timing.iterationCount;
-    var startOffset = this.timing.iterationStart * this.duration;
-    var isAtEndOfIterations = (this.timing.iterationCount != 0) &&
+        this._getAdjustedAnimationTime(this._animationTime);
+    var repeatedDuration = this.iterationDuration * this.specified._iterationCount();
+    var startOffset = this.specified.iterationStart * this.iterationDuration;
+    var isAtEndOfIterations = (this.specified._iterationCount() != 0) &&
         (adjustedAnimationTime - startOffset == repeatedDuration);
     this.currentIteration = isAtEndOfIterations ?
         this._floorWithOpenClosedRange(
-            adjustedAnimationTime, this.duration) :
+            adjustedAnimationTime, this.iterationDuration) :
         this._floorWithClosedOpenRange(
-            adjustedAnimationTime, this.duration);
+            adjustedAnimationTime, this.iterationDuration);
     var unscaledIterationTime = isAtEndOfIterations ?
         this._modulusWithOpenClosedRange(
-            adjustedAnimationTime, this.duration) :
+            adjustedAnimationTime, this.iterationDuration) :
         this._modulusWithClosedOpenRange(
-            adjustedAnimationTime, this.duration);
-    this.iterationTime = this._scaleIterationTime(unscaledIterationTime);
-    this._timeFraction = this.iterationTime / this.duration;
-    if (this.timing.timingFunction) {
-      this._timeFraction = this.timing.timingFunction.scaleTime(
-          this._timeFraction);
-      this.iterationTime = this._timeFraction * this.duration;
+            adjustedAnimationTime, this.iterationDuration);
+    this._iterationTime = this._scaleIterationTime(unscaledIterationTime);
+    this._timeFraction = this._iterationTime / this.iterationDuration;
+    console.assert(this._timeFraction >= 0.0 && this._timeFraction <= 1.0,
+        'Time fraction should be in the range [0, 1], got ' +
+        this._timeFraction + ' ' + this._iterationTime + ' ' +
+        this.iterationDuration + ' ' + isAtEndOfIterations + ' ' +
+        unscaledIterationTime);
+    var timingFunction = this.specified._timingFunction(this);
+    if (timingFunction) {
+      this._timeFraction = timingFunction.scaleTime(this._timeFraction);
     }
+    this._iterationTime = this._timeFraction * this.iterationDuration;
   },
   _updateTimeMarkers: function() {
     if (this.localTime === null) {
-      this.animationTime = null;
-      this.iterationTime = null;
+      this._animationTime = null;
+      this._iterationTime = null;
       this.currentIteration = null;
       this._timeFraction = null;
       return false;
     }
     this._updateAnimationTime();
-    if (this.animationTime === null) {
-      this.iterationTime = null;
+    if (this._animationTime === null) {
+      this._iterationTime = null;
       this.currentIteration = null;
       this._timeFraction = null;
-    } else if (this.duration == 0) {
+    } else if (this.iterationDuration == 0) {
       this._updateIterationParamsZeroDuration();
     } else {
       this._updateIterationParams();
@@ -555,53 +619,58 @@ TimedItem.prototype = {
     return Math.ceil(x / range) - 1;
   },
   _modulusWithClosedOpenRange: function(x, range) {
-    return x % range;
+    console.assert(range > 0, 'Range must be strictly positive');
+    var modulus = x % range;
+    var result = modulus < 0 ? modulus + range : modulus;
+    console.assert(result >= 0.0 && result < range,
+        'Result should be in the range [0, range)');
+    return result;
   },
   _modulusWithOpenClosedRange: function(x, range) {
-    var ret = this._modulusWithClosedOpenRange(x, range);
-    return ret == 0 ? range : ret;
+    var modulus = this._modulusWithClosedOpenRange(x, range);
+    var result = modulus == 0 ? range : modulus;
+    console.assert(result > 0.0 && result <= range,
+        'Result should be in the range (0, range]');
+    return result;
   },
   _isCurrentDirectionForwards: function() {
-    if (this.timing.direction == 'normal') {
+    if (this.specified.direction == 'normal') {
       return true;
     }
-    if (this.timing.direction == 'reverse') {
+    if (this.specified.direction == 'reverse') {
       return false;
     }
     var d = this.currentIteration;
-    if (this.timing.direction == 'alternate-reverse') {
+    if (this.specified.direction == 'alternate-reverse') {
       d += 1;
     }
     // TODO: 6.13.3 step 3. wtf?
     return d % 2 == 0;
   },
-  clone: function() {
-    throw new Error(
-        "Derived classes must override TimedItem.clone()");
-  },
+  clone: abstractMethod,
   before: function() {
     var newItems = [];
     for (var i = 0; i < arguments.length; i++) {
       newItems.push(arguments[i]);
     }
-    this.parentGroup._splice(this.parentGroup.indexOf(this), 0, newItems);
+    this.parent._splice(this.parent.indexOf(this), 0, newItems);
   },
   after: function() {
     var newItems = [];
     for (var i = 0; i < arguments.length; i++) {
       newItems.push(arguments[i]);
     }
-    this.parentGroup._splice(this.parentGroup.indexOf(this) + 1, 0, newItems);
+    this.parent._splice(this.parent.indexOf(this) + 1, 0, newItems);
   },
   replace: function() {
     var newItems = [];
     for (var i = 0; i < arguments.length; i++) {
       newItems.push(arguments[i]);
     }
-    this.parentGroup._splice(this.parentGroup.indexOf(this), 1, newItems);
+    this.parent._splice(this.parent.indexOf(this), 1, newItems);
   },
   remove: function() {
-    this.parentGroup._splice(this.parentGroup.indexOf(this), 1);
+    this.parent._splice(this.parent.indexOf(this), 1);
   },
   // Gets the leaf TimedItems currently in effect. Note that this is a superset
   // of the leaf TimedItems in their active interval, as a TimedItem can have an
@@ -611,46 +680,224 @@ TimedItem.prototype = {
       this._getLeafItemsInEffectImpl(items);
     }
   },
-  _getLeafItemsInEffectImpl: function(items) {
-    throw new Error(
-        "Derived classes must override TimedItem._getLeafItemsInEffectImpl()");
-  },
+  _getLeafItemsInEffectImpl: abstractMethod,
   _isPastEndOfActiveInterval: function() {
     return this._inheritedTime > this.endTime;
   },
   get player() {
-    return this.parentGroup === null ?
-        this._player : this.parentGroup.player;
+    return this.parent === null ?
+        this._player : this.parent.player;
   },
+  _isCurrent: function() {
+    return !this._isPastEndOfActiveInterval() ||
+           (this.parent !== null && this.parent._isCurrent());
+  },
+  _isTargetingElement: abstractMethod,
+  _getAnimationsTargetingElement: abstractMethod,
   _netEffectivePlaybackRate: function() {
     var effectivePlaybackRate = this._isCurrentDirectionForwards() ?
-        this.timing.playbackRate : -this.timing.playbackRate;
-    return this.parentGroup === null ? effectivePlaybackRate :
-        effectivePlaybackRate * this.parentGroup._netEffectivePlaybackRate();
+        this.specified.playbackRate : -this.specified.playbackRate;
+    return this.parent === null ? effectivePlaybackRate :
+        effectivePlaybackRate * this.parent._netEffectivePlaybackRate();
+  },
+  set onstart(fun) {
+    this._startHandler = fun;
+    this._newHandler(fun);
+  },
+  get onstart() {
+    return this._startHandler;
+  },
+  set oniteration(fun) {
+    this._iterationHandler = fun;
+    this._newHandler(fun);
+  },
+  get oniteration() {
+    return this._iterationHandler;
+  },
+  set onend(fun) {
+    this._endHandler = fun;
+    this._newHandler(fun);
+  },
+  get onend() {
+    return this._endHandler;
+  },
+  set oncancel(fun) {
+    this._cancelHandler = fun;
+    this._newHandler(fun);
+  },
+  get oncancel() {
+    return this._cancelHander;
+  },
+  _newHandler: function(fun) {
+    if (isDefinedAndNotNull(fun)) {
+      if (this.player) {
+        this.player._handlerAdded();
+      }
+    } else {
+      if (this.player) {
+        this.player._checkForHandlers();
+      }
+    }
+  },
+  _hasHandler: function() {
+    return isDefinedAndNotNull(this._startHandler) ||
+      isDefinedAndNotNull(this._iterationHandler) ||
+      isDefinedAndNotNull(this._endHandler) ||
+      isDefinedAndNotNull(this._cancelHandler);
+  },
+  _generateChildEventsForRange: function() { },
+  _toSubRanges: function(fromTime, toTime, iterationTimes) {
+    if (fromTime > toTime) {
+      var revRanges = this._toSubRanges(toTime, fromTime, iterationTimes);
+      revRanges.ranges.forEach(function(a) { a.reverse(); })
+      revRanges.ranges.reverse();
+      revRanges.start = iterationTimes.length - revRanges.start - 1;
+      revRanges.delta = -1;
+      return revRanges;
+    }
+    var skipped = 0;
+    // TODO: this should be calculatable. This would be more efficient
+    // than searching through the list.
+    while (iterationTimes[skipped] < fromTime) {
+      skipped++;
+    }
+    var currentStart = fromTime;
+    var ranges = [];
+    for (var i = skipped; i < iterationTimes.length; i++) {
+      if (iterationTimes[i] < toTime) {
+        ranges.push([currentStart, iterationTimes[i]]);
+        currentStart = iterationTimes[i];
+      } else {
+        ranges.push([currentStart, toTime]);
+        return {start: skipped, delta: 1, ranges: ranges};
+      }
+    }
+    ranges.push([currentStart, toTime]);
+    return {start: skipped, delta: 1, ranges: ranges};
+  },
+  _generateEvents: function(fromTime, toTime, globalTime, deltaScale) {
+    function toGlobal(time) {
+      return (globalTime - (toTime - (time / deltaScale)));
+    }
+    var localScale = this.specified.playbackRate;
+    var firstIteration = Math.floor(this.specified.iterationStart);
+    var lastIteration = Math.floor(this.specified.iterationStart +
+        this.specified.iterationCount);
+    if (lastIteration == this.specified.iterationStart + 
+      this.specified.iterationCount) {
+        lastIteration -= 1;
+    }
+    var startTime = this.startTime + this.specified.startDelay;
+
+    if (isDefinedAndNotNull(this.onstart)) {
+      // Did we pass the start of this animation in the forward direction?
+      if (fromTime <= startTime && toTime > startTime) {
+        this.onstart(new TimingEvent(constructorToken, this, 'start',
+            this.specified.startDelay, toGlobal(startTime), firstIteration));
+      // Did we pass the end of this animation in the reverse direction?
+      } else if (fromTime > this.endTime && toTime <= this.endTime) {
+        this.onstart(new TimingEvent(constructorToken, this, 'start',
+            this.endTime - this.startTime, toGlobal(this.endTime),
+            lastIteration));
+      }
+    }
+
+    // Calculate a list of uneased iteration times.
+    var iterationTimes = [];
+    for (var i = firstIteration + 1; i <= lastIteration; i++) {
+      iterationTimes.push(i - this.specified.iterationStart);
+    }
+    iterationTimes = iterationTimes.map(function(i) {
+      return i * this.iterationDuration / this.specified.playbackRate + startTime;
+    }.bind(this));
+
+    // Determine the impacted subranges.
+    var clippedFromTime;
+    var clippedToTime;
+    if (fromTime < toTime) {
+      clippedFromTime = Math.max(fromTime, startTime);
+      clippedToTime = Math.min(toTime, this.endTime);
+    } else {
+      clippedFromTime = Math.min(fromTime, this.endTime);
+      clippedToTime = Math.max(toTime, startTime);
+    }
+    var subranges = this._toSubRanges(clippedFromTime, clippedToTime,
+      iterationTimes);
+    for (var i = 0; i < subranges.ranges.length; i++) {
+      var currentIter = subranges.start + i * subranges.delta;
+      if (isDefinedAndNotNull(this.oniteration) && i > 0) {
+        var iterTime = subranges.ranges[i][0];
+        this.oniteration(new TimingEvent(constructorToken, this, 'iteration',
+            iterTime - this.startTime, toGlobal(iterTime), currentIter));
+      }
+
+      var iterFraction;
+      if (subranges.delta > 0) {
+        iterFraction = this.specified.iterationStart % 1;
+      } else {
+        iterFraction = 1 - 
+            (this.specified.iterationStart + this.specified.iterationCount) % 1;
+      }
+      this._generateChildEventsForRange(
+          subranges.ranges[i][0], subranges.ranges[i][1],
+          fromTime, toTime, currentIter - iterFraction,
+          globalTime, deltaScale * this.specified.playbackRate);
+    }
+
+    if (isDefinedAndNotNull(this.onend)) {
+      // Did we pass the end of this animation in the forward direction?
+      if (fromTime < this.endTime && toTime >= this.endTime) {
+        this.onend(new TimingEvent(constructorToken, this, 'end',
+            this.endTime - this.startTime, toGlobal(this.endTime),
+            lastIteration));
+      // Did we pass the start of this animation in the reverse direction?
+      } else if (fromTime >= startTime && toTime < startTime) {
+        this.onend(new TimingEvent(constructorToken, this, 'end',
+            this.specified.startDelay, toGlobal(startTime), firstIteration));
+      }
+    }
   },
 };
 
+var TimingEvent = function(token, target, type, localTime, timelineTime, iterationIndex, seeked) {
+  if (token !== constructorToken) {
+    throw new TypeError('Illegal constructor');
+  }
+  this.target = target;
+  this.type = type;
+  this.cancelBubble = false;
+  this.cancelable = false;
+  this.defaultPrevented = false;
+  this.eventPhase = 0;
+  this.returnValue = true;
+  this.localTime = localTime;
+  this.timelineTime = timelineTime;
+  this.iterationIndex = iterationIndex;
+  this.seeked = seeked ? true : false;
+}
+
+TimingEvent.prototype = Object.create(Event.prototype);
+
 var isCustomAnimationEffect = function(animationEffect) {
   // TODO: How does WebIDL actually differentiate different callback interfaces?
-  return typeof animationEffect === "object" &&
+  return isDefinedAndNotNull(animationEffect) &&
+      typeof animationEffect === "object" &&
       animationEffect.hasOwnProperty("sample") &&
       typeof animationEffect.sample === "function";
 };
 
 var interpretAnimationEffect = function(animationEffect) {
-  if (animationEffect instanceof AnimationEffect) {
+  if (animationEffect instanceof AnimationEffect ||
+      isCustomAnimationEffect(animationEffect)) {
     return animationEffect;
-  } else if (typeof animationEffect === 'object') {
-    if (isCustomAnimationEffect(animationEffect)) {
-      return animationEffect;
-    } else {
-      return AnimationEffect.createFromProperties(animationEffect);
-    }
-  } else {
-    try {
-      throw new Error('TypeError');
-    } catch (e) { console.log(e.stack); throw e; }
+  } else if (isDefinedAndNotNull(animationEffect) &&
+      typeof animationEffect === 'object') {
+    // The spec requires animationEffect to be an instance of
+    // OneOrMoreKeyframes, but this type is just a dictionary or a list of
+    // dictionaries, so the best we can do is test for an object.
+    return new KeyframeAnimationEffect(animationEffect);
   }
+  return null;
 };
 
 var cloneAnimationEffect = function(animationEffect) {
@@ -667,59 +914,105 @@ var cloneAnimationEffect = function(animationEffect) {
   }
 };
 
-var interpretTimingParam = function(timing) {
-  if (!isDefinedAndNotNull(timing)) {
-    return new Timing({});
-  }
-  if (timing instanceof Timing || timing instanceof TimingProxy) {
-    return timing;
-  }
-  if (typeof(timing) === 'number') {
-    return new Timing({duration: timing});
-  }
-  if (typeof(timing) === 'object') {
-    return new Timing(timing);
-  }
-  throw new TypeError('timing parameters must be undefined, Timing objects, ' +
-      'numbers, or timing dictionaries; not \'' + timing + '\'');
-};
-
 /** @constructor */
-var Animation = function(target, animationEffect, timing, parentGroup) {
-  this.animationEffect = interpretAnimationEffect(animationEffect);
-  this.timing = interpretTimingParam(timing);
-
-  TimedItem.call(this, constructorToken, timing, parentGroup);
-
-  this.targetElement = target;
-  this.name = this.animationEffect instanceof KeyframeAnimationEffect ?
-      this.animationEffect.property : '<anon>';
+var Animation = function(target, animationEffect, timingInput) {
+  enterModifyCurrentAnimationState();
+  try {
+    TimedItem.call(this, constructorToken, timingInput);
+    this.effect = interpretAnimationEffect(animationEffect);
+    this._target = target;
+  } finally {
+    exitModifyCurrentAnimationState(false);
+  }
 };
 
 Animation.prototype = createObject(TimedItem.prototype, {
   _sample: function() {
-    this.animationEffect.sample(this._timeFraction,
-        this.currentIteration, this.targetElement,
-        this.underlyingValue);
+    if (isDefinedAndNotNull(this.effect) &&
+        !(this.target instanceof PseudoElementReference)) {
+      var sampleMethod = isCustomAnimationEffect(this.effect) ?
+          this.effect.sample : this.effect._sample;
+      sampleMethod.apply(this.effect, [this._timeFraction,
+          this.currentIteration, this.target, this.underlyingValue]);
+    }
   },
   _getLeafItemsInEffectImpl: function(items) {
     items.push(this);
   },
+  _isTargetingElement: function(element) {
+    return element === this.target;
+  },
+  _getAnimationsTargetingElement: function(element, animations) {
+    if (this._isTargetingElement(element)) {
+      animations.push(this);
+    }
+  },
+  get target() {
+    return this._target;
+  },
+  set effect(effect) {
+    enterModifyCurrentAnimationState();
+    try {
+      this._effect = effect;
+      this.specified._invalidateTimingFunction();
+    } finally {
+      exitModifyCurrentAnimationState(Boolean(this.player) && this.player._hasTicked);
+    }
+  },
+  get effect() {
+    return this._effect;
+  },
   clone: function() {
-    return new Animation(this.targetElement,
-        cloneAnimationEffect(this.animationEffect), this.timing.clone());
+    return new Animation(this.target,
+        cloneAnimationEffect(this.effect), this.specified._dict);
   },
   toString: function() {
-    var funcDescr = this.animationEffect instanceof AnimationEffect ?
-        this.animationEffect.toString() : 'Custom scripted function';
+    var effectString = '<none>';
+    if (this.effect instanceof AnimationEffect) {
+      effectString = this.effect.toString();
+    } else if (isCustomAnimationEffect(this.effect)) {
+      effectString = 'Custom effect';
+    }
     return 'Animation ' + this.startTime + '-' + this.endTime + ' (' +
-        this.localTime + ') ' + funcDescr;
-  }
+        this.localTime + ') ' + effectString;
+  },
 });
 
+function throwNewHierarchyRequestError() {
+  var element = document.createElement('span');
+  element.appendChild(element);
+}
 
 /** @constructor */
-var TimingGroup = function(token, type, children, timing, parentGroup) {
+var TimedItemList = function(token, children) {
+  if (token !== constructorToken) {
+    throw new TypeError('Illegal constructor');
+  }
+  this._children = children;
+  this._getters = 0;
+  this._ensureGetters();
+};
+
+TimedItemList.prototype = {
+  get length() {
+    return this._children.length;
+  },
+  _ensureGetters: function() {
+    while (this._getters < this._children.length) {
+      this._ensureGetter(this._getters++);
+    }
+  },
+  _ensureGetter: function(i) {
+    Object.defineProperty(this, i, {
+      get: function() {
+        return this._children[i];
+      }
+    });
+  }
+};
+
+/** @constructor */
+var TimingGroup = function(token, type, children, timing) {
   if (token !== constructorToken) {
     throw new TypeError('Illegal constructor');
   }
@@ -732,23 +1025,24 @@ var TimingGroup = function(token, type, children, timing, parentGroup) {
   // initializing super.
   this.type = type || 'par';
   this._children = [];
-  this.length = 0;
-  TimedItem.call(this, constructorToken, timing, parentGroup);
+  this._cachedTimedItemList = null;
+  TimedItem.call(this, constructorToken, timing);
   // We add children after setting the parent. This means that if an ancestor
   // (including the parent) is specified as a child, it will be removed from our
   // ancestors and used as a child,
   this.append.apply(this, childrenCopy);
-  // TODO: Work out where to expose name in the API
-  // this.name = properties.name || '<anon>';
 };
 
 TimingGroup.prototype = createObject(TimedItem.prototype, {
   _childrenStateModified: function() {
     // See _updateChildStartTimes().
     this._isInChildrenStateModified = true;
+    if (this._cachedTimedItemList) {
+      this._cachedTimedItemList._ensureGetters();
+    }
 
     // We need to walk up and down the tree to re-layout. endTime and the
-    // various durations (which are all calculated lazily) are the only
+    // various iterationDurations (which are all calculated lazily) are the only
     // properties of a TimedItem which can affect the layout of its ancestors.
     // So it should be sufficient to simply update start times and time markers
     // on the way down.
@@ -760,6 +1054,10 @@ TimingGroup.prototype = createObject(TimedItem.prototype, {
     // Update child start times before walking down.
     this._updateChildStartTimes();
 
+    if (this.player) {
+      this.player._checkForHandlers();
+    }
+
     this._isInChildrenStateModified = false;
   },
   _updateInheritedTime: function(inheritedTime) {
@@ -768,16 +1066,16 @@ TimingGroup.prototype = createObject(TimedItem.prototype, {
     this._updateChildInheritedTimes();
   },
   _updateChildInheritedTimes: function() {
-    for (var i = 0; i < this.children.length; i++) {
-      var child = this.children[i];
-      child._updateInheritedTime(this.iterationTime);
+    for (var i = 0; i < this._children.length; i++) {
+      var child = this._children[i];
+      child._updateInheritedTime(this._iterationTime);
     }
   },
   _updateChildStartTimes: function() {
     if (this.type == 'seq') {
       var cumulativeStartTime = 0;
-      for (var i = 0; i < this.children.length; i++) {
-        var child = this.children[i];
+      for (var i = 0; i < this._children.length; i++) {
+        var child = this._children[i];
         if (child._stashedStartTime === undefined) {
           child._stashedStartTime = child._startTime;
         }
@@ -786,43 +1084,35 @@ TimingGroup.prototype = createObject(TimedItem.prototype, {
         // about to be done in the down phase of _childrenStateModified().
         if (!child._isInChildrenStateModified) {
           // This calls _updateTimeMarkers() on the child.
-          child._updateInheritedTime(this.iterationTime);
+          child._updateInheritedTime(this._iterationTime);
         }
-        cumulativeStartTime += Math.max(0, child.timing.startDelay +
-            child.animationDuration);
+        cumulativeStartTime += Math.max(0, child.specified.startDelay +
+            child.activeDuration);
       }
     }
   },
   get children() {
-    return this._children;
+    if (!this._cachedTimedItemList) {
+      this._cachedTimedItemList = new TimedItemList(constructorToken, this._children);
+    }
+    return this._cachedTimedItemList;
   },
   get firstChild() {
-    return this.children[0];
+    return this._children[0];
   },
   get lastChild() {
-    return this.children[this.children.length - 1];
-  },
-  getAnimationsForElement: function(elem) {
-    var result = [];
-    for (var i = 0; i < this.children.length; i++) {
-      if (this.children[i].getAnimationsForElement) {
-        result = result.concat(this.children[i].getAnimationsForElement(elem));
-      } else if (this.children[i].targetElement == elem) {
-        result.push(this.children[i]);
-      }
-    }
-    return result;
+    return this._children[this.children.length - 1];
   },
   _intrinsicDuration: function() {
     if (this.type == 'par') {
-      var dur = Math.max.apply(undefined, this.children.map(function(a) {
+      var dur = Math.max.apply(undefined, this._children.map(function(a) {
         return a.endTime;
       }));
       return Math.max(0, dur);
     } else if (this.type == 'seq') {
       var result = 0;
-      this.children.forEach(function(a) {
-        result += a.animationDuration + a.timing.startDelay;
+      this._children.forEach(function(a) {
+        result += a.activeDuration + a.specified.startDelay;
       });
       return result;
     } else {
@@ -830,41 +1120,28 @@ TimingGroup.prototype = createObject(TimedItem.prototype, {
     }
   },
   _getLeafItemsInEffectImpl: function(items) {
-    for (var i = 0; i < this.children.length; i++) {
-      this.children[i]._getLeafItemsInEffect(items);
+    for (var i = 0; i < this._children.length; i++) {
+      this._children[i]._getLeafItemsInEffect(items);
     }
   },
   clone: function() {
     var children = [];
-    this.children.forEach(function(child) {
+    this._children.forEach(function(child) {
       children.push(child.clone());
     });
     return this.type === "par" ?
-        new ParGroup(children, this.timing.clone()) :
-        new SeqGroup(children, this.timing.clone());
-  },
-  _lengthChanged: function() {
-    while (this.length < this.children.length) {
-      var i = this.length++;
-      Object.defineProperty(this, i, configureDescriptor({
-        set: function(x) { this.children[i] = x; },
-        get: function() { return this.children[i]; },
-      }));
-    }
-    while (this.length > this.children.length) {
-      var i = --this.length;
-      delete this[i];
-    }
+        new ParGroup(children, this.specified._dict):
+        new SeqGroup(children, this.specified._dict);
   },
   clear: function() {
-    this.splice(0, this.children.length);
+    this._splice(0, this._children.length);
   },
   append: function() {
     var newItems = [];
     for (var i = 0; i < arguments.length; i++) {
       newItems.push(arguments[i]);
     }
-    this._splice(this.length, 0, newItems);
+    this._splice(this._children.length, 0, newItems);
   },
   prepend: function() {
     var newItems = [];
@@ -874,67 +1151,119 @@ TimingGroup.prototype = createObject(TimedItem.prototype, {
     this._splice(0, 0, newItems);
   },
   _addInternal: function(child) {
-    this.children.push(child);
-    this._lengthChanged();
+    this._children.push(child);
     this._childrenStateModified();
   },
   indexOf: function(item) {
-    return this.children.indexOf(item);
+    return this._children.indexOf(item);
   },
   _splice: function(start, deleteCount, newItems) {
-    var args = arguments;
-    if (args.length == 3) {
-      args = [start, deleteCount].concat(newItems);
-    }
-    for (var i = 2; i < args.length; i++) {
-      var newChild = args[i];
-      if (this._isInclusiveAncestor(newChild)) {
-        throw new HierarchyRequestError();
+    enterModifyCurrentAnimationState();
+    try {
+      var args = arguments;
+      if (args.length == 3) {
+        args = [start, deleteCount].concat(newItems);
       }
-      newChild._reparent(this);
+      for (var i = 2; i < args.length; i++) {
+        var newChild = args[i];
+        if (this._isInclusiveAncestor(newChild)) {
+          throwNewHierarchyRequestError();
+        }
+        newChild._reparent(this);
+      }
+      var result = Array.prototype['splice'].apply(this._children, args);
+      for (var i = 0; i < result.length; i++) {
+        result[i]._parent = null;
+      }
+      this._childrenStateModified();
+      return result;
+    } finally {
+      exitModifyCurrentAnimationState(Boolean(this.player) && this.player._hasTicked);
     }
-    var result = Array.prototype['splice'].apply(this.children, args);
-    for (var i = 0; i < result.length; i++) {
-      result[i]._parentGroup = null;
-    }
-    this._lengthChanged();
-    this._childrenStateModified();
-    return result;
   },
   _isInclusiveAncestor: function(item) {
     for (var ancestor = this; ancestor != null;
-      ancestor = ancestor.parentGroup) {
+      ancestor = ancestor.parent) {
       if (ancestor === item) {
         return true;
       }
     }
     return false;
   },
+  _isTargetingElement: function(element) {
+    return this._children.some(function(child) {
+      return child._isTargetingElement(element);
+    });
+  },
+  _getAnimationsTargetingElement: function(element, animations) {
+    this._children.map(function(child) {
+      return child._getAnimationsTargetingElement(element, animations);
+    });
+  },
   toString: function() {
     return this.type + ' ' + this.startTime + '-' + this.endTime + ' (' +
         this.localTime + ') ' + ' [' +
-        this.children.map(function(a) { return a.toString(); }) + ']'
+        this._children.map(function(a) { return a.toString(); }) + ']'
+  },
+  _hasHandler: function() {
+    return TimedItem.prototype._hasHandler.call(this) ||
+      (this._children.length > 0 &&
+        this._children.reduce(function(a, b) { return a || b._hasHandler() },
+          false));
+  },
+  _generateChildEventsForRange: function(localStart, localEnd, rangeStart,
+      rangeEnd, iteration, globalTime, deltaScale) {
+    var start;
+    var end;
+
+    if (localEnd - localStart > 0) {
+      start = Math.max(rangeStart, localStart);
+      end = Math.min(rangeEnd, localEnd);
+      if (start >= end) {
+        return;
+      }
+    } else {
+      start = Math.min(rangeStart, localStart);
+      end = Math.max(rangeEnd, localEnd);
+      if (start <= end) {
+        return;
+      }
+    }
+
+    var endDelta = rangeEnd - end;
+    start -= iteration * this.iterationDuration / deltaScale;
+    end -= iteration * this.iterationDuration / deltaScale;
+
+    for (var i = 0; i < this._children.length; i++) {
+      this._children[i]._generateEvents(start, end, globalTime - endDelta, deltaScale);
+    }
   },
 });
 
 /** @constructor */
-var  ParGroup = function(children, timing, parentGroup) {
-  TimingGroup.call(this, constructorToken, 'par', children, timing, parentGroup);
+var  ParGroup = function(children, timing, parent) {
+  TimingGroup.call(this, constructorToken, 'par', children, timing, parent);
 };
 
 ParGroup.prototype = Object.create(TimingGroup.prototype);
 
 /** @constructor */
-var SeqGroup = function(children, timing, parentGroup) {
-  TimingGroup.call(this, constructorToken, 'seq', children, timing, parentGroup);
+var SeqGroup = function(children, timing, parent) {
+  TimingGroup.call(this, constructorToken, 'seq', children, timing, parent);
 };
 
 SeqGroup.prototype = Object.create(TimingGroup.prototype);
 
+/** @constructor */
+var PseudoElementReference = function(element, pseudoElement) {
+    this.element = element;
+    this.pseudoElement = pseudoElement;
+    console.warn("PseudoElementReference is not supported.");
+};
 
 /** @constructor */
-var MediaReference = function(mediaElement, timing, parentGroup) {
-  TimedItem.call(this, constructorToken, timing, parentGroup);
+var MediaReference = function(mediaElement, timing, parent, delta) {
+  TimedItem.call(this, constructorToken, timing, parent);
   this._media = mediaElement;
 
   // We can never be sure when _updateInheritedTime() is going to be called
@@ -942,7 +1271,8 @@ var MediaReference = function(mediaElement, timing, parentGroup) {
   // element's currentTime may drift from our iterationTime. So if a media
   // element has loop set, we can't be sure that we'll stop it before it wraps.
   // For this reason, we simply disable looping.
-  // TODO: Maybe we should let it loop if our duration exceeds it's length?
+  // TODO: Maybe we should let it loop if our iterationDuration exceeds it's
+  // length?
   this._media.loop = false;
 
   // If the media element has a media controller, we detach it. This mirrors the
@@ -950,6 +1280,8 @@ var MediaReference = function(mediaElement, timing, parentGroup) {
   // TODO: It would be neater to assign to MediaElement.controller, but this was
   // broken in Chrome until recently. See crbug.com/226270.
   this._media.mediaGroup = '';
+
+  this._delta = delta;
 };
 
 MediaReference.prototype = createObject(TimedItem.prototype, {
@@ -990,7 +1322,7 @@ MediaReference.prototype = createObject(TimedItem.prototype, {
     }
     return false;
   },
-  // Note that a media element's timeline may not start at zero, although it's
+  // Note that a media element's timeline may not start at zero, although its
   // duration is always the timeline time at the end point. This means that an
   // element's duration isn't always it's length and not all values of the
   // timline are seekable. Furthermore, some types of media further limit the
@@ -1013,13 +1345,13 @@ MediaReference.prototype = createObject(TimedItem.prototype, {
     // play() and pause().
 
     // Handle the case of being outside our effect interval.
-    if (this.iterationTime === null) {
+    if (this._iterationTime === null) {
       this._ensureIsAtUnscaledTime(0);
       this._ensurePaused();
       return;
     }
 
-    if (this.iterationTime >= this._intrinsicDuration()) {
+    if (this._iterationTime >= this._intrinsicDuration()) {
       // Our iteration time exceeds the media element's duration, so just make
       // sure the media element is at the end. It will stop automatically, but
       // that could take some time if the seek below is significant, so force
@@ -1030,15 +1362,15 @@ MediaReference.prototype = createObject(TimedItem.prototype, {
     }
 
     var finalIteration = this._floorWithOpenClosedRange(
-        this.timing.iterationStart + this.timing.iterationCount, 1.0);
+        this.specified.iterationStart + this.specified._iterationCount(), 1.0);
     var endTimeFraction = this._modulusWithOpenClosedRange(
-        this.timing.iterationStart + this.timing.iterationCount, 1.0);
+        this.specified.iterationStart + this.specified._iterationCount(), 1.0);
     if (this.currentIteration === finalIteration &&
         this._timeFraction === endTimeFraction &&
-        this._intrinsicDuration() >= this.duration) {
+        this._intrinsicDuration() >= this.iterationDuration) {
       // We have reached the end of our final iteration, but the media element
       // is not done.
-      this._ensureIsAtUnscaledTime(this.duration * endTimeFraction);
+      this._ensureIsAtUnscaledTime(this.iterationDuration * endTimeFraction);
       this._ensurePaused();
       return;
     }
@@ -1056,7 +1388,7 @@ MediaReference.prototype = createObject(TimedItem.prototype, {
     // but in this case, we don't want to play the media element, as it prevents
     // us from synchronising properly.
     if (this.player.paused ||
-        !this._isSeekableUnscaledTime(this.iterationTime)) {
+        !this._isSeekableUnscaledTime(this._iterationTime)) {
       this._ensurePaused();
     } else {
       this._ensurePlaying();
@@ -1067,166 +1399,180 @@ MediaReference.prototype = createObject(TimedItem.prototype, {
     // exactly the right speed. There's also a variable delay when the video is
     // first played.
     // TODO: What's the right value for this delta?
-    var delta = 0.2 * Math.abs(this._media.playbackRate);
-    if (Math.abs(this.iterationTime - this._unscaledMediaCurrentTime()) >
+    var delta = isDefinedAndNotNull(this._delta) ? this._delta :
+        0.2 * Math.abs(this._media.playbackRate);
+    if (Math.abs(this._iterationTime - this._unscaledMediaCurrentTime()) >
         delta) {
-      this._ensureIsAtUnscaledTime(this.iterationTime);
+      this._ensureIsAtUnscaledTime(this._iterationTime);
     }
+  },
+  _isTargetingElement: function(element) {
+    return this._media === element;
+  },
+  _getAnimationsTargetingElement: function(element, animations) { },
+  _attach: function(player) {
+    this._ensurePaused();
+    TimedItem.prototype._attach.call(this, player);
   },
 });
 
 
 /** @constructor */
-var AnimationEffect = function(token, operation, accumulateOperation) {
+var AnimationEffect = function(token, accumulate) {
   if (token !== constructorToken) {
     throw new TypeError('Illegal constructor');
   }
-  this.operation = operation === undefined ? 'replace' : operation;
-  this.accumulateOperation =
-      accumulateOperation == undefined ? 'none' : accumulateOperation;
+  enterModifyCurrentAnimationState();
+  try {
+    this.accumulate = accumulate;
+  } finally {
+    exitModifyCurrentAnimationState(false);
+  }
 };
 
 AnimationEffect.prototype = {
-  sample: function(timeFraction, currentIteration, target) {
-    throw 'Unimplemented sample function';
+  get accumulate() {
+    return this._accumulate;
   },
-  getValue: function(target) {
-    return;
-  },
-  clone: function() {
-    throw 'Unimplemented clone method'
-  }
-};
-
-AnimationEffect.createFromProperties = function(properties) {
-  // Step 1 - determine set of animation properties
-  var animProps = [];
-  for (var candidate in properties) {
-    if (candidate == 'operation') {
-      continue;
-    }
-    animProps.push(candidate);
-  }
-
-  // Step 2 - Create AnimationEffect objects
-  if (animProps.length === 0) {
-    return null;
-  } else if (animProps.length === 1) {
-    return AnimationEffect._createKeyframeFunction(
-        animProps[0], properties[animProps[0]], properties.operation);
-  } else {
-    var result = new GroupedAnimationEffect();
-    for (var i = 0; i < animProps.length; i++) {
-      result.add(AnimationEffect._createKeyframeFunction(
-          animProps[i], properties[animProps[i]], properties.operation));
-    }
-    return result;
-  }
-}
-
-// Step 3 - Create a KeyframeAnimationEffect object
-AnimationEffect._createKeyframeFunction =
-    function(property, value, operation) {
-  var func = new KeyframeAnimationEffect(property);
-
-  if (typeof value === 'string') {
-    func.frames.add(new Keyframe(value, 0));
-    func.frames.add(new Keyframe(value, 1));
-    func.operation = 'merge';
-  } else if (Array.isArray(value)) {
-    for (var i = 0; i < value.length; i++) {
-      if (typeof value[i] !== 'string') {
-        var val = isDefinedAndNotNull(value[i].value) ? value[i].value : "";
-        var offset = isDefinedAndNotNull(value[i].offset) ? value[i].offset : 1;
-        func.frames.add(new Keyframe(val, offset));
-      } else {
-        var offset = i / (value.length - 1);
-        func.frames.add(new Keyframe(value[i], offset));
-      }
-    }
-  } else {
+  set accumulate(value) {
+    enterModifyCurrentAnimationState();
     try {
-      throw new Error('TypeError');
-    } catch (e) { console.log(e.stack); throw e; }
-  }
+      // Use the default value if an invalid string is specified.
+      this._accumulate = value === 'sum' ? 'sum' : 'none';
+    } finally {
+      exitModifyCurrentAnimationState(true);
+    }
+  },
+  _sample: abstractMethod,
+  clone: abstractMethod,
+  toString: abstractMethod,
+};
 
-  if (isDefinedAndNotNull(operation)) {
-    func.operation = operation;
-  }
-
-  return func;
+var clamp = function(x, min, max) {
+  return Math.max(Math.min(x, max), min);
 }
 
 /** @constructor */
-var GroupedAnimationEffect = function() {
-  AnimationEffect.call(this, constructorToken);
-  this.children = [];
-};
+var PathAnimationEffect = function(path, autoRotate, angle, composite,
+    accumulate) {
+  enterModifyCurrentAnimationState();
+  try {
+    AnimationEffect.call(this, constructorToken, accumulate);
 
-GroupedAnimationEffect.prototype = createObject(AnimationEffect.prototype, {
-  item: function(i) {
-    return this.children[i];
-  },
-  add: function(func) {
-    this.children.push(func);
-  },
-  remove: function(i) {
-    this.children.splice(i, 1);
-  },
-  sample: function(timeFraction, currentIteration, target) {
-    for (var i = 0; i < this.children.length; i++) {
-      this.children[i].sample(timeFraction, currentIteration, target);
+    // Use the default value if an invalid string is specified.
+    this.composite = composite;
+
+    // TODO: path argument is not in the spec -- seems useful since
+    // SVGPathSegList doesn't have a constructor.
+    this.autoRotate = isDefined(autoRotate) ? autoRotate : 'none';
+    this.angle = isDefined(angle) ? angle : 0;
+    this._path = document.createElementNS('http://www.w3.org/2000/svg','path');
+    if (path instanceof SVGPathSegList) {
+      this.segments = path;
+    } else {
+      var tempPath = document.createElementNS(
+          'http://www.w3.org/2000/svg','path');
+      tempPath.setAttribute('d', String(path));
+      this.segments = tempPath.pathSegList;
     }
-  },
-  clone: function() {
-    var result = new GroupedAnimationEffect();
-    for (var i = 0; i < this.children.length; i++) {
-      result.add(this.children[i].clone());
-    }
-  },
-  get length() {
-    return this.children.length;
+  } finally {
+    exitModifyCurrentAnimationState(false);
   }
-});
-
-/** @constructor */
-var PathAnimationEffect = function(path, operation, accumulateOperation) {
-  AnimationEffect.call(this, constructorToken, operation, accumulateOperation);
-  // TODO: path argument is not in the spec -- seems useful since
-  // SVGPathSegList doesn't have a constructor.
-  this._path = path;
 };
 
 PathAnimationEffect.prototype = createObject(AnimationEffect.prototype, {
-  sample: function(timeFraction, currentIteration, target) {
-    var length = this._path.getTotalLength();
-    var point = this._path.getPointAtLength(timeFraction * length);
+  get composite() {
+    return this._composite;
+  },
+  set composite(value) {
+    enterModifyCurrentAnimationState();
+    try {
+      // Use the default value if an invalid string is specified.
+      this._composite = value === 'add' ? 'add' : 'replace';
+    } finally {
+      exitModifyCurrentAnimationState(true);
+    }
+  },
+  _sample: function(timeFraction, currentIteration, target) {
+    // TODO: Handle accumulation.
+    var lengthAtTimeFraction = this._lengthAtTimeFraction(timeFraction);
+    var point = this._path.getPointAtLength(lengthAtTimeFraction);
     var x = point.x - target.offsetWidth / 2;
     var y = point.y - target.offsetHeight / 2;
     // TODO: calc(point.x - 50%) doesn't work?
     var value = [{t: 'translate', d: [{px: x}, {px: y}]}];
-    if (this.rotate) {
+    var angle = this.angle;
+    if (this._autoRotate == 'auto-rotate') {
       // Super hacks
-      var lastPoint = this._path.getPointAtLength(timeFraction *
-          length - 0.01);
+      var lastPoint = this._path.getPointAtLength(lengthAtTimeFraction - 0.01);
       var dx = point.x - lastPoint.x;
       var dy = point.y - lastPoint.y;
       var rotation = Math.atan2(dy, dx);
-      value.push({t:'rotate', d: [rotation / 2 / Math.PI * 360]});
+      angle += rotation / 2 / Math.PI * 360;
     }
+    value.push({t:'rotate', d: [angle]});
     compositor.setAnimatedValue(target, "transform",
-        new AnimatedResult(value, this.operation, timeFraction));
+        new AddReplaceCompositableValue(value, this.composite));
+  },
+  _lengthAtTimeFraction: function(timeFraction) {
+    var segmentCount = this._cumulativeLengths.length - 1;
+    if (!segmentCount) {
+      return 0;
+    }
+    var scaledFraction = timeFraction * segmentCount;
+    var index = clamp(Math.floor(scaledFraction), 0, segmentCount)
+    return this._cumulativeLengths[index] + ((scaledFraction % 1) * (
+        this._cumulativeLengths[index + 1] - this._cumulativeLengths[index]));
   },
   clone: function() {
     return new PathAnimationEffect(this._path.getAttribute('d'));
   },
+  toString: function() {
+    return '<PathAnimationEffect>';
+  },
+  set autoRotate(autoRotate) {
+    enterModifyCurrentAnimationState();
+    try {
+      this._autoRotate = String(autoRotate);
+    } finally {
+      exitModifyCurrentAnimationState(true);
+    }
+  },
+  get autoRotate() {
+    return this._autoRotate;
+  },
+  set angle(angle) {
+    enterModifyCurrentAnimationState();
+    try {
+      // TODO: This should probably be a string with a unit, but the spec
+      //       says it's a double.
+      this._angle = Number(angle);
+    } finally {
+      exitModifyCurrentAnimationState(true);
+    }
+  },
+  get angle() {
+    return this._angle;
+  },
   set segments(segments) {
-    // TODO: moving the path segments is not entirely correct, but we can't
-    // assign the list to the path.
-    var targetSegments = this._path.pathSegList;
-    targetSegments.clear();
-    for (var i = 0; i < segments.numberOfItems; i++) {
-      this._path.pathSegList.appendItem(segments.getItem(i));
+    enterModifyCurrentAnimationState();
+    try {
+      var targetSegments = this.segments;
+      targetSegments.clear();
+      var cumulativeLengths = [0];
+      // TODO: *moving* the path segments is not correct, but pathSegList
+      //       is read only
+      while (segments.numberOfItems) {
+        var segment = segments.getItem(0);
+        targetSegments.appendItem(segment);
+        if (segment.pathSegType !== SVGPathSeg.PATHSEG_MOVETO_REL &&
+            segment.pathSegType !== SVGPathSeg.PATHSEG_MOVETO_ABS) {
+          cumulativeLengths.push(this._path.getTotalLength());
+        }
+      }
+      this._cumulativeLengths = cumulativeLengths;
+    } finally {
+      exitModifyCurrentAnimationState(true);
     }
   },
   get segments() {
@@ -1234,186 +1580,412 @@ PathAnimationEffect.prototype = createObject(AnimationEffect.prototype, {
   }
 });
 
-/** @constructor */
-var KeyframeAnimationEffect =
-    function(property, operation, accumulateOperation) {
-  AnimationEffect.call(this, constructorToken, operation, accumulateOperation);
-  this.property = property;
-  this.frames = new KeyframeList(constructorToken);
+
+var normalizeKeyframeDictionary = function(properties) {
+  var result = {
+    offset: null,
+    composite: null,
+  };
+  var animationProperties = [];
+  for (var property in properties) {
+    // TODO: Apply the CSS property to IDL attribute algorithm.
+    if (property === 'offset') {
+      if (typeof properties.offset === 'number') {
+        result.offset = properties.offset;
+      }
+    } else if (property === 'composite') {
+      if (properties.composite === 'add' || properties.composite === 'replace') {
+        result.composite = properties.composite;
+      }
+    } else {
+      // TODO: Check whether this is a supported property.
+      animationProperties.push(property);
+    }
+  }
+  // TODO: Remove prefixed properties if the unprefixed version is also
+  // supported and present.
+  animationProperties = animationProperties.sort();
+  for (var i = 0; i < animationProperties.length; i++) {
+    // TODO: Apply the IDL attribute to CSS property algorithm.
+    var property = animationProperties[i];
+    // TODO: The spec does not specify how to handle null values.
+    // See https://www.w3.org/Bugs/Public/show_bug.cgi?id=22572
+    result[property] = isDefinedAndNotNull(properties[property]) ?
+        properties[property].toString() : '';
+  }
+  return result;
 };
 
-KeyframeAnimationEffect.prototype = createObject(
-    AnimationEffect.prototype, {
-  sample: function(timeFraction, currentIteration, target) {
-    var frames = this.frames._sorted();
-    if (frames.length == 0) {
-      return;
+
+/** @constructor */
+var KeyframeAnimationEffect = function(oneOrMoreKeyframeDictionaries,
+    composite, accumulate) {
+  enterModifyCurrentAnimationState();
+  try {
+    AnimationEffect.call(this, constructorToken, accumulate);
+
+    this.composite = composite;
+
+    this.setFrames(oneOrMoreKeyframeDictionaries);
+  } finally {
+    exitModifyCurrentAnimationState(false);
+  }
+};
+
+KeyframeAnimationEffect.prototype = createObject(AnimationEffect.prototype, {
+  get composite() {
+    return this._composite;
+  },
+  set composite(value) {
+    enterModifyCurrentAnimationState();
+    try {
+      // Use the default value if an invalid string is specified.
+      this._composite = value === 'add' ? 'add' : 'replace';
+    } finally {
+      exitModifyCurrentAnimationState(true);
     }
-    var afterFrameNum = null;
-    var beforeFrameNum = null;
-    var i = 0;
-    while (i < frames.length) {
-      if (frames[i].offset == timeFraction) {
-        // TODO: This should probably call fromCssValue and toCssValue for
-        // cases where we have to massage the data before setting e.g.
-        // 'rotate(45deg)' is valid, but for UAs that don't support CSS
-        // Transforms syntax on SVG content we have to convert that to
-        // 'rotate(45)' before setting.
-        this.ensureRawValue(frames[i]);
-        compositor.setAnimatedValue(target, this.property,
-            new AnimatedResult(frames[i].rawValue, this.operation,
-            timeFraction));
-        return;
+  },
+  getFrames: function() {
+    return this._keyframeDictionaries.slice(0);
+  },
+  setFrames: function(oneOrMoreKeyframeDictionaries) {
+    enterModifyCurrentAnimationState();
+    try {
+      if (!Array.isArray(oneOrMoreKeyframeDictionaries)) {
+        oneOrMoreKeyframeDictionaries = [oneOrMoreKeyframeDictionaries];
       }
-      if (frames[i].offset > timeFraction) {
-        afterFrameNum = i;
-        break;
-      }
-      i++;
+      this._keyframeDictionaries =
+          oneOrMoreKeyframeDictionaries.map(normalizeKeyframeDictionary);
+      // Set lazily
+      this._cachedProperties = null;
+      this._cachedDistributedKeyframes = null;
+    } finally {
+      exitModifyCurrentAnimationState(true);
     }
-    if (afterFrameNum == 0) {
-      // In the case where we have a negative time fraction and a keyframe at
-      // offset 0, the expected behavior is to extrapolate the interval that
-      // starts at 0, rather than to use the base value.
-      if (frames[0].offset === 0) {
-        afterFrameNum = frames.length > 1 ? 1 : frames.length;
-        beforeFrameNum = 0;
-      } else {
-        beforeFrameNum = -1;
-      }
-    } else if (afterFrameNum == null) {
-      // In the case where we have a time fraction greater than 1 and a
-      // keyframe at 1, the expected behavior is to extrapolate the interval
-      // that ends at 1, rather than to use the base value.
-      if (frames[frames.length-1].offset === 1) {
-        afterFrameNum = frames.length - 1;
-        beforeFrameNum = frames.length > 1 ? frames.length - 2 : -1;
-      } else {
-        beforeFrameNum = frames.length - 1;
-        afterFrameNum = frames.length;
-      }
-    } else {
-      beforeFrameNum = afterFrameNum - 1;
+  },
+  _sample: function(timeFraction, currentIteration, target) {
+    var properties = this._getProperties();
+    for (var i = 0; i < properties.length; i++) {
+      compositor.setAnimatedValue(target, properties[i],
+          this._sampleForProperty(timeFraction, currentIteration,
+              properties[i]));
     }
-    var beforeFrame;
-    if (beforeFrameNum == -1) {
-      beforeFrame = {
-        rawValue: zero(this.property, frames[afterFrameNum].value),
-        offset: 0
-      };
-    } else {
-      beforeFrame = frames[beforeFrameNum];
-      this.ensureRawValue(beforeFrame);
+  },
+  _sampleForProperty: function(timeFraction, currentIteration, property) {
+    var frames = this._propertySpecificKeyframes(property);
+    var unaccumulatedValue =
+        this._unaccumulatedValueForProperty(frames, timeFraction, property);
+
+    // We can only accumulate if this iteration is strictly positive and if all
+    // keyframes use the same composite operation.
+    if (this.accumulate === 'sum' &&
+        currentIteration > 0 &&
+        this._allKeyframesUseSameCompositeOperation(frames)) {
+      // TODO: The spec is vague about the order of addition here when using add
+      // composition.
+      return new AccumulatedCompositableValue(unaccumulatedValue,
+          this._getAccumulatingValue(frames, property), currentIteration);
     }
 
-    var afterFrame;
-    if (afterFrameNum == frames.length) {
-      afterFrame = {
-        rawValue: zero(this.property, frames[beforeFrameNum].value),
-        offset: 1
-      };
-    } else {
-      afterFrame = frames[afterFrameNum];
-      this.ensureRawValue(afterFrame);
-    }
-    // TODO: apply time function
-    var localTimeFraction = (timeFraction - beforeFrame.offset) /
-        (afterFrame.offset - beforeFrame.offset);
-    // TODO: property-based interpolation for things that aren't simple
-    var animationValue = interpolate(this.property, beforeFrame.rawValue,
-        afterFrame.rawValue, localTimeFraction);
-    compositor.setAnimatedValue(target, this.property,
-        new AnimatedResult(animationValue, this.operation, timeFraction));
+    return unaccumulatedValue;
   },
-  getValue: function(target) {
-    return getValue(target, this.property);
+  _getAccumulatingValue: function(frames, property) {
+    console.assert(this._allKeyframesUseSameCompositeOperation(frames),
+        'Accumulation only valid if all frames use same composite operation');
+
+    // This is a BlendedCompositableValue, though because the offset is 1.0, we
+    // could simplify it to an AddReplaceCompositableValue representing the
+    // keyframe at offset 1.0. We don't do this because the spec is likely to
+    // change such that there is no guarantee that a keyframe with offset 1.0 is
+    // present.
+    // TODO: Consider caching this.
+    var unaccumulatedValueAtOffsetOne =
+        this._unaccumulatedValueForProperty(frames, 1.0, property);
+
+    if (this._compositeForKeyframe(frames[0]) === 'add') {
+      return unaccumulatedValueAtOffsetOne;
+    }
+
+    // For replace composition, we must evaluate the BlendedCompositableValue
+    // to get a concrete value (note that the choice of underlying value is
+    // irrelevant since it uses replace composition). We then form a new
+    // AddReplaceCompositable value to add-composite this concrete value.
+    console.assert(!unaccumulatedValueAtOffsetOne.dependsOnUnderlyingValue());
+    return new AddReplaceCompositableValue(
+        unaccumulatedValueAtOffsetOne.compositeOnto(property, null), 'add');
+  },
+  _unaccumulatedValueForProperty: function(frames, timeFraction, property) {
+    console.assert(frames.length >= 2,
+        'Interpolation requires at least two keyframes');
+
+    var startKeyframeIndex;
+    var length = frames.length;
+    // We extrapolate differently depending on whether or not there are multiple
+    // keyframes at offsets of 0 and 1.
+    if (timeFraction < 0.0) {
+      if (frames[1].offset === 0.0) {
+        return new AddReplaceCompositableValue(
+            frames[0].rawValueForProperty(property),
+            this._compositeForKeyframe(frames[0]));
+      } else {
+        startKeyframeIndex = 0;
+      }
+    } else if (timeFraction >= 1.0) {
+      if (frames[length - 2].offset === 1.0) {
+        return new AddReplaceCompositableValue(
+            frames[length - 1].rawValueForProperty(property),
+            this._compositeForKeyframe(frames[length - 1]));
+      } else {
+        startKeyframeIndex = length - 2;
+      }
+    } else {
+      for (var i = length - 1; i >= 0; i--) {
+        if (frames[i].offset <= timeFraction) {
+          console.assert(frames[i].offset !== 1.0);
+          startKeyframeIndex = i;
+          break;
+        }
+      }
+    }
+    var startKeyframe = frames[startKeyframeIndex];
+    var endKeyframe = frames[startKeyframeIndex + 1];
+    var intervalDistance = (timeFraction - startKeyframe.offset) /
+        (endKeyframe.offset - startKeyframe.offset);
+    return new BlendedCompositableValue(
+        new AddReplaceCompositableValue(
+            startKeyframe.rawValueForProperty(property),
+            this._compositeForKeyframe(startKeyframe)),
+        new AddReplaceCompositableValue(
+            endKeyframe.rawValueForProperty(property),
+            this._compositeForKeyframe(endKeyframe)),
+        intervalDistance);
+  },
+  _propertySpecificKeyframes: function(property) {
+    // TODO: Consider caching these.
+    var distributedFrames = this._getDistributedKeyframes();
+    var frames = [];
+    for (var i = 0; i < distributedFrames.length; i++) {
+      if (distributedFrames[i].hasValueForProperty(property)) {
+        frames.push(distributedFrames[i]);
+      }
+    }
+    console.assert(frames.length > 0,
+        'There should always be keyframes for each property');
+
+    // Add 0 and 1 keyframes if required.
+    if (frames[0].offset !== 0.0) {
+      var keyframe = new KeyframeInternal(0.0, 'add');
+      keyframe.addPropertyValuePair(property, cssNeutralValue);
+      frames.unshift(keyframe);
+    }
+    if (frames[frames.length - 1].offset !== 1.0) {
+      var keyframe = new KeyframeInternal(1.0, 'add');
+      keyframe.addPropertyValuePair(property, cssNeutralValue);
+      frames.push(keyframe);
+    }
+    console.assert(frames.length >= 2,
+        'There should be at least two keyframes including synthetic keyframes');
+
+    return frames;
   },
   clone: function() {
-    var result = new KeyframeAnimationEffect(
-        this.property, this.operation, this.accumulateOperation);
-    result.frames = this.frames.clone();
+    var result = new KeyframeAnimationEffect([], this.composite,
+        this.accumulate);
+    result._keyframeDictionaries = this._keyframeDictionaries.slice(0);
     return result;
   },
-  ensureRawValue: function(frame) {
-    if (isDefinedAndNotNull(frame.rawValue)) {
-      return;
-    }
-    frame.rawValue = fromCssValue(this.property, frame.value);
-  },
   toString: function() {
-    return this.property;
+    return '<KeyframeAnimationEffect>';
+  },
+  _compositeForKeyframe: function(keyframe) {
+    return isDefinedAndNotNull(keyframe.composite) ?
+        keyframe.composite : this.composite;
+  },
+  _allKeyframesUseSameCompositeOperation: function(keyframes) {
+    console.assert(keyframes.length >= 1, 'This requires at least one keyframe');
+    var composite = this._compositeForKeyframe(keyframes[0]);
+    for (var i = 1; i < keyframes.length; i++) {
+      if (this._compositeForKeyframe(keyframes[i]) !== composite) {
+        return false;
+      }
+    }
+    return true;
+  },
+  _areKeyframeDictionariesLooselySorted: function() {
+    var previousOffset = -Infinity;
+    for (var i = 0; i < this._keyframeDictionaries.length; i++) {
+      if (isDefinedAndNotNull(this._keyframeDictionaries[i].offset)) {
+        if (this._keyframeDictionaries[i].offset < previousOffset) {
+          return false;
+        }
+        previousOffset = this._keyframeDictionaries[i].offset;
+      }
+    }
+    return true;
+  },
+  // The spec describes both this process and the process for interpretting the
+  // properties of a keyframe dictionary as 'normalizing'. Here we use the term
+  // 'distributing' to avoid confusion with normalizeKeyframeDictionary().
+  _getDistributedKeyframes: function() {
+    if (isDefinedAndNotNull(this._cachedDistributedKeyframes)) {
+      return this._cachedDistributedKeyframes;
+    }
+
+    this._cachedDistributedKeyframes = [];
+    if (!this._areKeyframeDictionariesLooselySorted()) {
+      return this._cachedDistributedKeyframes;
+    }
+
+    this._cachedDistributedKeyframes = this._keyframeDictionaries.map(
+        KeyframeInternal.createFromNormalizedProperties);
+
+    // Remove keyframes with offsets out of bounds.
+    var length = this._cachedDistributedKeyframes.length;
+    var count = 0;
+    for (var i = 0; i < length; i++) {
+      var offset = this._cachedDistributedKeyframes[i].offset;
+      if (isDefinedAndNotNull(offset)) {
+        if (offset >= 0) {
+          break;
+        } else {
+          count = i;
+        }
+      }
+    }
+    this._cachedDistributedKeyframes.splice(0, count);
+
+    length = this._cachedDistributedKeyframes.length;
+    count = 0;
+    for (var i = length - 1; i >= 0; i--) {
+      var offset = this._cachedDistributedKeyframes[i].offset;
+      if (isDefinedAndNotNull(offset)) {
+        if (offset <= 1) {
+          break;
+        } else {
+          count = length - i;
+        }
+      }
+    }
+    this._cachedDistributedKeyframes.splice(length - count, count);
+
+    // Distribute offsets.
+    length = this._cachedDistributedKeyframes.length;
+    if (length > 1 && !isDefinedAndNotNull(this._cachedDistributedKeyframes[0].offset)) {
+      this._cachedDistributedKeyframes[0].offset = 0;
+    }
+    if (!isDefinedAndNotNull(this._cachedDistributedKeyframes[length - 1].offset)) {
+      this._cachedDistributedKeyframes[length - 1].offset = 1;
+    }
+    var lastOffsetIndex = 0;
+    var nextOffsetIndex = 0;
+    for (var i = 1; i < this._cachedDistributedKeyframes.length - 1; i++) {
+      var keyframe = this._cachedDistributedKeyframes[i];
+      if (isDefinedAndNotNull(keyframe.offset)) {
+        lastOffsetIndex = i;
+        continue;
+      }
+      if (i > nextOffsetIndex) {
+        nextOffsetIndex = i;
+        while (!isDefinedAndNotNull(
+            this._cachedDistributedKeyframes[nextOffsetIndex].offset)) {
+          nextOffsetIndex++;
+        }
+      }
+      var lastOffset = this._cachedDistributedKeyframes[lastOffsetIndex].offset;
+      var nextOffset = this._cachedDistributedKeyframes[nextOffsetIndex].offset;
+      var unspecifiedKeyframes = nextOffsetIndex - lastOffsetIndex - 1;
+      console.assert(unspecifiedKeyframes > 0);
+      var localIndex = i - lastOffsetIndex;
+      console.assert(localIndex > 0);
+      this._cachedDistributedKeyframes[i].offset = lastOffset +
+          (nextOffset - lastOffset) * localIndex / (unspecifiedKeyframes + 1);
+    }
+
+    // Remove invalid property values.
+    for (var i = this._cachedDistributedKeyframes.length - 1; i >= 0; i--) {
+      var keyframe = this._cachedDistributedKeyframes[i];
+      for (var property in keyframe.cssValues) {
+        if (!KeyframeInternal.isSupportedPropertyValue(
+            keyframe.cssValues[property])) {
+          delete(keyframe.cssValues[property]);
+        }
+      }
+      if (Object.keys(keyframe).length === 0) {
+        this._cachedDistributedKeyframes.splice(i, 1);
+      }
+    }
+
+    return this._cachedDistributedKeyframes;
+  },
+  _getProperties: function() {
+    if (!isDefinedAndNotNull(this._cachedProperties)) {
+      var properties = {};
+      var frames = this._getDistributedKeyframes();
+      for (var i = 0; i < frames.length; i++) {
+        for (var property in frames[i].cssValues) {
+          properties[property] = true;
+        }
+      }
+      this._cachedProperties = [];
+      for (var p in properties) {
+        if (properties.hasOwnProperty(p)) {
+          this._cachedProperties.push(p);
+        }
+      }
+    }
+    return this._cachedProperties;
   }
 });
 
+
+// An internal representation of a keyframe. The Keyframe type from the spec is
+// just a dictionary and is not exposed.
 /** @constructor */
-var Keyframe = function(value, offset) {
-  this.value = value;
-  this.rawValue = null;
+var KeyframeInternal = function(offset, composite) {
+  console.assert(typeof offset === 'number' || offset === null,
+      'Invalid offset value');
+  console.assert(composite === 'add' || composite === 'replace' || composite === null,
+      'Invalid composite value');
   this.offset = offset;
+  this.composite = composite;
+  this.cssValues = {};
+  // Set lazily
+  this.rawValues = {};
 };
 
-/** @constructor */
-var KeyframeList = function(token) {
-  if (token !== constructorToken) {
-    throw new TypeError('Illegal constructor');
-  }
-  this.frames = [];
-  this._isSorted = true;
-};
-
-KeyframeList.prototype = {
-  _sorted: function() {
-    if (!this._isSorted) {
-      this.frames.sort(function(a, b) {
-        if (a.offset < b.offset) {
-          return -1;
-        }
-        if (a.offset > b.offset) {
-          return 1;
-        }
-        return 0;
-      });
-      this._isSorted = true;
+KeyframeInternal.prototype = {
+  rawValueForProperty: function(property) {
+    if (!isDefinedAndNotNull(this.rawValues[property])) {
+      this.rawValues[property] = fromCssValue(property, this.cssValues[property]);
     }
-    return this.frames;
+    return this.rawValues[property];
   },
-  item: function(index) {
-    if (index >= this.length || index < 0) {
-      return null;
-    }
-    return this.frames[index];
+  addPropertyValuePair: function(property, value) {
+    console.assert(!this.cssValues.hasOwnProperty(property));
+    this.cssValues[property] = value;
   },
-  add: function(frame) {
-    this.frames.push(frame);
-    this._isSorted = false;
-    return frame;
-  },
-  remove: function(frame) {
-    var index = this.frames.indexOf(frame);
-    if (index == -1) {
-      return undefined;
-    }
-    this.frames.splice(index, 1);
-    return frame;
-  },
-  clone: function() {
-    var result = new KeyframeList(constructorToken);
-    for (var i = 0; i < this.frames.length; i++) {
-      result.add(new Keyframe(this.frames[i].value, this.frames[i].offset));
-    }
-    return result;
-  },
-  get length() {
-    return this.frames.length;
+  hasValueForProperty: function(property) {
+    return this.cssValues.hasOwnProperty(property);
   }
 };
 
-var presetTimings = {
-  'ease': [0.25, 0.1, 0.25, 1.0],
-  'linear': [0.0, 0.0, 1.0, 1.0],
-  'ease-in': [0.42, 0, 1.0, 1.0],
-  'ease-out': [0, 0, 0.58, 1.0],
-  'ease-in-out': [0.42, 0, 0.58, 1.0]
+KeyframeInternal.isSupportedPropertyValue = function(value) {
+  console.assert(typeof value === 'string' || value === cssNeutralValue);
+  // TODO: Check this properly!
+  return value !== '';
+};
+
+KeyframeInternal.createFromNormalizedProperties = function(properties) {
+  console.assert(
+      isDefinedAndNotNull(properties) && typeof properties === 'object',
+      'Properties must be an object');
+  var keyframe = new KeyframeInternal(properties.offset, properties.composite);
+  for (var candidate in properties) {
+    if (candidate !== 'offset' && candidate !== 'composite') {
+      keyframe.addPropertyValuePair(candidate, properties[candidate]);
+    }
+  }
+  return keyframe;
 };
 
 /** @constructor */
@@ -1421,10 +1993,19 @@ var TimingFunction = function() {
   throw new TypeError('Illegal constructor');
 };
 
-TimingFunction.createFromString = function(spec) {
-  var preset = presetTimings[spec];
+TimingFunction.prototype.scaleTime = abstractMethod;
+
+TimingFunction.createFromString = function(spec, timedItem) {
+  var preset = presetTimingFunctions[spec];
   if (preset) {
-    return new SplineTimingFunction(presetTimings[spec]);
+    return preset;
+  }
+  if (spec === 'paced') {
+    if (timedItem instanceof Animation &&
+        timedItem.effect instanceof PathAnimationEffect) {
+      return new PacedTimingFunction(timedItem);
+    }
+    return presetTimingFunctions.linear;
   }
   var stepMatch = /steps\(\s*(\d+)\s*,\s*(start|end|middle)\s*\)/.exec(spec);
   if (stepMatch) {
@@ -1439,7 +2020,7 @@ TimingFunction.createFromString = function(spec) {
         Number(bezierMatch[3]),
         Number(bezierMatch[4])]);
   }
-  throw 'not a timing function: ' + spec;
+  return presetTimingFunctions.linear;
 };
 
 /** @constructor */
@@ -1468,11 +2049,17 @@ SplineTimingFunction.prototype = createObject(TimingFunction.prototype, {
     var xDiff = this.map[fst][0] - this.map[fst - 1][0];
     var p = (fraction - this.map[fst - 1][0]) / xDiff;
     return this.map[fst - 1][1] + p * yDiff;
-  },
-  clone: function() {
-    return new SplineTimingFunction(this.params);
   }
 });
+
+var presetTimingFunctions = {
+  'linear': null,
+  'ease': new SplineTimingFunction([0.25, 0.1, 0.25, 1.0]),
+  'ease-in': new SplineTimingFunction([0.42, 0, 1.0, 1.0]),
+  'ease-out': new SplineTimingFunction([0, 0, 0.58, 1.0]),
+  'ease-in-out': new SplineTimingFunction([0.42, 0, 0.58, 1.0]),
+};
+
 
 /** @constructor */
 var StepTimingFunction = function(numSteps, position) {
@@ -1492,9 +2079,46 @@ StepTimingFunction.prototype = createObject(TimingFunction.prototype, {
     }
     return fraction - fraction % stepSize;
   },
-  clone: function() {
-    return new StepTimingFunction(this.numSteps, this.position);
-  }
+});
+
+/** @constructor */
+var PacedTimingFunction = function(timedItem) {
+  this._timedItem = timedItem;
+};
+
+PacedTimingFunction.prototype = createObject(TimingFunction.prototype, {
+  scaleTime: function(fraction) {
+    var cumulativeLengths = this._timedItem.effect._cumulativeLengths;
+    var totalLength = cumulativeLengths[cumulativeLengths.length - 1];
+    if (!totalLength || fraction <= 0) {
+      return 0;
+    }
+    var length = fraction * totalLength;
+    var leftIndex = this._findLeftIndex(cumulativeLengths, length);
+    if (leftIndex >= cumulativeLengths.length - 1) {
+      return 1;
+    }
+    var leftLength = cumulativeLengths[leftIndex];
+    var segmentLength = cumulativeLengths[leftIndex + 1] - leftLength;
+    if (segmentLength > 0) {
+      return (leftIndex + ((length - leftLength) / segmentLength)) /
+          (cumulativeLengths.length - 1);
+    }
+    return leftLength / cumulativeLengths.length;
+  },
+  _findLeftIndex: function(array, value) {
+    var leftIndex = 0;
+    var rightIndex = array.length;
+    while (rightIndex - leftIndex > 1) {
+      var midIndex = (leftIndex + rightIndex) >> 1;
+      if (array[midIndex] <= value) {
+        leftIndex = midIndex;
+      } else {
+        rightIndex = midIndex;
+      }
+    }
+    return leftIndex;
+  },
 });
 
 var interp = function(from, to, f, type) {
@@ -1524,38 +2148,72 @@ var interpArray = function(from, to, f, type) {
   return result;
 };
 
+// TODO: This type does not handle 'inherit'.
 var numberType = {
-  zero: function() { return 0; },
-  add: function(base, delta) { return base + delta; },
-  interpolate: interp,
+  add: function(base, delta) {
+    // If base or delta are 'auto', we fall back to replacement.
+    if (base === 'auto' || delta === 'auto') {
+      return nonNumericType.add(base, delta);
+    }
+    return base + delta;
+  },
+  interpolate: function(from, to, f) {
+    // If from or to are 'auto', we fall back to step interpolation.
+    if (from === 'auto' || to === 'auto') {
+      return nonNumericType.interpolate(from, to);
+    }
+    return interp(from, to, f);
+  },
   toCssValue: function(value) { return value + ''; },
-  fromCssValue: function(value) { return value !== '' ? Number(value): null; }
+  fromCssValue: function(value) {
+    if (value === 'auto') {
+      return 'auto';
+    }
+    var result = Number(value);
+    return isNaN(result) ? undefined : result;
+  },
 };
 
+// TODO: This type does not handle 'inherit'.
 var integerType = createObject(numberType, {
-  interpolate: function(from, to, f) { return Math.floor(interp(from, to, f)); }
+  interpolate: function(from, to, f) {
+    // If from or to are 'auto', we fall back to step interpolation.
+    if (from === 'auto' || to === 'auto') {
+      return nonNumericType.interpolate(from, to);
+    }
+    return Math.floor(interp(from, to, f));
+  }
 });
 
 var fontWeightType = {
-  zero: function() { return 0; },
   add: function(base, delta) { return base + delta; },
   interpolate: function(from, to, f) {
     return interp(from, to, f);
   },
   toCssValue: function(value) {
-      value = Math.round(value / 100) * 100
-      value = Math.min(900, Math.max(100, value));
-      return String(value);
+    value = Math.round(value / 100) * 100
+    value = clamp(value, 100, 900);
+    if (value === 400) {
+      return 'normal';
+    }
+    if (value === 700) {
+      return 'bold';
+    }
+    return String(value);
   },
   fromCssValue: function(value) {
-    if (value == 'normal') {
+    if (value === 'normal') {
       return 400;
     }
-    if (value == 'bold') {
+    if (value === 'bold') {
       return 700;
     }
     // TODO: support lighter / darker ?
-    return Number(value);
+    var out = Number(value);
+    if (isNaN(out) || out < 100 || out > 900 || out % 100 !== 0) {
+      return undefined;
+    }
+    return out;
   }
 };
 
@@ -1568,8 +2226,20 @@ var outerCalcRE = /calc\s*\(\s*([^)]*)\)/;
 var valueRE = /\s*(-?[0-9.]*)([a-zA-Z%]*)/;
 var operatorRE = /\s*([+-])/;
 var percentLengthType = {
+  isAuto: function(x) {
+    if ('auto' in x) {
+      console.assert(Object.keys(x).length === 1,
+          'percentLengthType should not contain auto with other values');
+      return true;
+    }
+    return false;
+  },
   zero: function() { return {}; },
   add: function(base, delta) {
+    // If base or delta are 'auto', we fall back to replacement.
+    if (percentLengthType.isAuto(base) || percentLengthType.isAuto(delta)) {
+      return nonNumericType.add(base, delta);
+    }
     var out = {};
     for (var value in base) {
       out[value] = base[value] + (delta[value] || 0);
@@ -1583,6 +2253,10 @@ var percentLengthType = {
     return out;
   },
   interpolate: function(from, to, f) {
+    // If from or to are 'auto', we fall back to step interpolation.
+    if (percentLengthType.isAuto(from) || percentLengthType.isAuto(to)) {
+      return nonNumericType.interpolate(from, to);
+    }
     var out = {};
     for (var value in from) {
       out[value] = interp(from[value], to[value], f);
@@ -1619,7 +2293,7 @@ var percentLengthType = {
         out[singleValue[2]] = Number(singleValue[1]);
         return out;
       }
-      return {};
+      return undefined;
     }
     innards = innards[1];
     var first_time = true;
@@ -1630,7 +2304,7 @@ var percentLengthType = {
       } else {
         var op = operatorRE.exec(innards);
         if (!op) {
-          return {};
+          return undefined;
         }
         if (op[1] == '-') {
           reversed = true;
@@ -1639,7 +2313,7 @@ var percentLengthType = {
       }
       value = valueRE.exec(innards);
       if (!value) {
-        return {};
+        return undefined;
       }
       if (!isDefinedAndNotNull(out[value[2]])) {
         out[value[2]] = 0;
@@ -1659,14 +2333,6 @@ var percentLengthType = {
 
 var rectangleRE = /rect\(([^,]+),([^,]+),([^,]+),([^)]+)\)/;
 var rectangleType = {
-  zero: function() {
-    return {
-      top: percentLengthType.zero(),
-      right: percentLengthType.zero(),
-      bottom: percentLengthType.zero(),
-      left: percentLengthType.zero()
-    };
-  },
   add: function(base, delta) {
     return {
       top: percentLengthType.add(base.top, delta.top),
@@ -1684,6 +2350,12 @@ var rectangleType = {
     };
   },
   toCssValue: function(value) {
+    if (percentLengthType.isAuto(value.top) &&
+        percentLengthType.isAuto(value.right) &&
+        percentLengthType.isAuto(value.bottom) &&
+        percentLengthType.isAuto(value.left)) {
+      return 'auto';
+    }
     return 'rect(' +
         percentLengthType.toCssValue(value.top) + ',' +
         percentLengthType.toCssValue(value.right) + ',' +
@@ -1691,19 +2363,37 @@ var rectangleType = {
         percentLengthType.toCssValue(value.left) + ')';
   },
   fromCssValue: function(value) {
+    if (value === 'auto') {
+      return {
+        top: percentLengthType.fromCssValue('auto'),
+        right: percentLengthType.fromCssValue('auto'),
+        bottom: percentLengthType.fromCssValue('auto'),
+        left: percentLengthType.fromCssValue('auto'),
+      };
+    }
     var match = rectangleRE.exec(value);
-    return {
+    if (!match) {
+      return undefined;
+    }
+    var out = {
       top: percentLengthType.fromCssValue(match[1]),
       right: percentLengthType.fromCssValue(match[2]),
       bottom: percentLengthType.fromCssValue(match[3]),
       left: percentLengthType.fromCssValue(match[4])
     };
+    if (out.top && out.right && out.bottom && out.left) {
+      return out;
+    }
+    return undefined;
   }
 };
 
 var shadowType = {
   zero: function() {
-      return [];
+    return {
+      hOffset: lengthType.zero(),
+      vOffset: lengthType.zero(),
+    };
   },
   _addSingle: function(base, delta) {
     if (base && delta && base.inset != delta.inset) {
@@ -1786,9 +2476,14 @@ var shadowType = {
   toCssValue: function(value) {
     return value.map(this._toCssValueSingle).join(', ');
   },
+  // TODO: This should handle the case where the color comes before the
+  // lengths.
   fromCssValue: function(value) {
     var shadows = value.split(/\s*,\s*/);
     var result = shadows.map(function(value) {
+      if (value === 'none') {
+        return shadowType.zero();
+      }
       value = value.replace(/^\s+|\s+$/g, '');
       var parts = value.split(/\s+/);
       if (parts.length < 2 || parts.length > 6) {
@@ -1805,8 +2500,6 @@ var shadowType = {
       var lengths = [];
       while (parts.length) {
         var part = parts.shift();
-        // TODO: what's the contract for fromCssValue, assuming it returns
-        // undefined if it cannot parse the value (colorType behaves this way)
         color = colorType.fromCssValue(part);
         if (color) {
           result.color = color;
@@ -1816,6 +2509,9 @@ var shadowType = {
           break;
         }
         var length = lengthType.fromCssValue(part);
+        if (!length) {
+          return undefined;
+        }
         lengths.push(length);
       }
       if (lengths.length < 2 || lengths.length > 4) {
@@ -1834,14 +2530,11 @@ var shadowType = {
       }
       return result;
     });
-    return result.every(isDefined) ? result : [];
+    return result.every(isDefined) ? result : undefined;
   }
 };
 
 var nonNumericType = {
-  zero: function() {
-    return undefined;
-  },
   add: function(base, delta) {
     return isDefined(delta) ? delta : base;
   },
@@ -1853,7 +2546,7 @@ var nonNumericType = {
   },
   fromCssValue: function(value) {
     return value;
-  }
+  },
 };
 
 var visibilityType = createObject(nonNumericType, {
@@ -1868,6 +2561,12 @@ var visibilityType = createObject(nonNumericType, {
       return to;
     }
     return 'visible';
+  },
+  fromCssValue: function(value) {
+    if (['visible', 'hidden', 'collapse'].indexOf(value) !== -1) {
+      return value;
+    }
+    return undefined;
   },
 });
 
@@ -1971,11 +2670,19 @@ var colorType = {
   fromCssValue: function(value) {
     var r = rgbRE.exec(value);
     if (r) {
-      return [Number(r[1]), Number(r[2]), Number(r[3]), 1];
+      var out = [Number(r[1]), Number(r[2]), Number(r[3]), 1];
+      if (out.some(isNaN)) {
+        return undefined;
+      }
+      return out;
     }
     r = rgbaRE.exec(value);
     if (r) {
-      return [Number(r[1]), Number(r[2]), Number(r[3]), Number(r[4])];
+      var out = [Number(r[1]), Number(r[2]), Number(r[3]), Number(r[4])];
+      if (out.some(isNaN)) {
+        return undefined;
+      }
+      return out;
     }
     return namedColors[value];
   }
@@ -2422,7 +3129,7 @@ function interpolateTransformsWithMatrices(from, to, f) {
   var toM = decomposeMatrix(convertToMatrix(to));
 
   var product = dot(fromM.quaternion, toM.quaternion);
-  product = Math.max(Math.min(product, 1.0), -1.0);
+  product = clamp(product, -1.0, 1.0);
   if (product == 1.0) {
     var quat = fromM.quaternion;
   } else {
@@ -2447,6 +3154,7 @@ function interpolateTransformsWithMatrices(from, to, f) {
 function interpTransformValue(from, to, f) {
   var type = from.t ? from.t : to.t;
   switch(type) {
+    // Transforms with unitless parameters.
     case 'rotate':
     case 'rotateX':
     case 'rotateY':
@@ -2459,9 +3167,11 @@ function interpTransformValue(from, to, f) {
     case 'skew':
     case 'skewX':
     case 'skewY':
+    case 'matrix':
       return {t: type, d:interp(from.d, to.d, f, type)};
       break;
     default:
+      // Transforms with lengthType parameters.
       var result = [];
       if (from.d && to.d) {
         var maxVal = Math.max(from.d.length, to.d.length);
@@ -2490,7 +3200,6 @@ function n(num) {
 }
 
 var transformType = {
-  zero: function(t) { throw 'UNIMPLEMENTED'; },
   add: function(base, delta) { return base.concat(delta); },
   interpolate: function(from, to, f) {
     var out = []
@@ -2597,7 +3306,7 @@ var transformType = {
   fromCssValue: function(value) {
     // TODO: fix this :)
     if (value === undefined) {
-      return "";
+      return undefined;
     }
     var result = []
     while (value.length > 0) {
@@ -2690,25 +3399,27 @@ var getType = function(property) {
   return propertyTypes[property] || nonNumericType;
 }
 
-var zero = function(property, value) {
-  return getType(property).zero(value);
-};
-
 var add = function(property, base, delta) {
+  if (delta === rawNeutralValue) {
+    return base;
+  }
   return getType(property).add(base, delta);
 }
 
 /**
  * Interpolate the given property name (f*100)% of the way from 'from' to 'to'.
- * 'from' and 'to' are both CSS value strings. Requires the target element to
- * be able to determine whether the given property is an SVG attribute or not,
- * as this impacts the conversion of the interpolated value back into a CSS
- * value string for transform translations.
+ * 'from' and 'to' are both raw values already converted from CSS value
+ * strings. Requires the target element to be able to determine whether the
+ * given property is an SVG attribute or not, as this impacts the conversion of
+ * the interpolated value back into a CSS value string for transform
+ * translations.
  *
  * e.g. interpolate('transform', elem, 'rotate(40deg)', 'rotate(50deg)', 0.3);
  *   will return 'rotate(43deg)'.
  */
 var interpolate = function(property, from, to, f) {
+  console.assert(isDefinedAndNotNull(from) && isDefinedAndNotNull(to),
+      'Both to and from values should be specified for interpolation');
   return getType(property).interpolate(from, to, f);
 }
 
@@ -2722,15 +3433,111 @@ var toCssValue = function(property, value, svgMode) {
 }
 
 var fromCssValue = function(property, value) {
-  return getType(property).fromCssValue(value);
+  if (value === cssNeutralValue) {
+    return rawNeutralValue;
+  }
+  // Currently we'll hit this assert if input to the API is bad. To avoid this,
+  // we should eliminate invalid values when normalizing the list of keyframes.
+  // See the TODO in isSupportedPropertyValue().
+  var result = getType(property).fromCssValue(value);
+  console.assert(isDefinedAndNotNull(result),
+      'Invalid property value "' + value + '" for property "' + property + '"');
+  return result;
 }
 
+// Sentinel values
+var cssNeutralValue = {};
+var rawNeutralValue = {};
+
 /** @constructor */
-var AnimatedResult = function(value, operation, fraction) {
+var CompositableValue = function() {
+};
+
+CompositableValue.prototype = {
+  compositeOnto: abstractMethod,
+  // This is purely an optimization.
+  dependsOnUnderlyingValue: function() {
+    return true;
+  },
+};
+
+
+/** @constructor */
+var AddReplaceCompositableValue = function(value, composite) {
   this.value = value;
-  this.operation = operation;
+  this.composite = composite;
+  console.assert(
+      !(this.value === cssNeutralValue && this.composite === 'replace'),
+      'Should never replace-composite the neutral value');
+};
+
+AddReplaceCompositableValue.prototype =
+    createObject(CompositableValue.prototype, {
+  compositeOnto: function(property, underlyingValue) {
+    switch (this.composite) {
+      case 'replace':
+        return this.value;
+      case 'add':
+        return add(property, underlyingValue, this.value);
+      default:
+        console.assert(false, 'Invalid composite operation ' + this.composite);
+    }
+  },
+  dependsOnUnderlyingValue: function() {
+    return this.composite === 'add';
+  },
+});
+
+
+/** @constructor */
+var BlendedCompositableValue = function(beforeValue, afterValue, fraction) {
+  this.beforeValue = beforeValue;
+  this.afterValue = afterValue;
   this.fraction = fraction;
 };
+
+BlendedCompositableValue.prototype =
+    createObject(CompositableValue.prototype, {
+  compositeOnto: function(property, underlyingValue) {
+    return interpolate(property,
+        this.beforeValue.compositeOnto(property, underlyingValue),
+        this.afterValue.compositeOnto(property, underlyingValue),
+        this.fraction);
+  },
+  dependsOnUnderlyingValue: function() {
+    return this.beforeValue.dependsOnUnderlyingValue() ||
+        this.afterValue.dependsOnUnderlyingValue();
+  },
+});
+
+
+/** @constructor */
+var AccumulatedCompositableValue = function(bottomValue, accumulatingValue,
+    accumulationCount) {
+  this.bottomValue = bottomValue;
+  this.accumulatingValue = accumulatingValue;
+  this.accumulationCount = accumulationCount;
+  console.assert(this.accumulationCount > 0,
+      'Accumumlation count should be strictly positive');
+};
+
+AccumulatedCompositableValue.prototype =
+    createObject(CompositableValue.prototype, {
+  compositeOnto: function(property, underlyingValue) {
+    // The spec defines accumulation recursively, but we do it iteratively to
+    // better handle large numbers of iterations.
+    var result = this.bottomValue.compositeOnto(property, underlyingValue);
+    for (var i = 0; i < this.accumulationCount; i++) {
+      result = this.accumulatingValue.compositeOnto(property, result);
+    }
+    return result;
+  },
+  dependsOnUnderlyingValue: function() {
+    return this.bottomValue.dependsOnUnderlyingValue() &&
+        this.accumulatingValue.dependsOnUnderlyingValue();
+  },
+});
+
 
 /** @constructor */
 var CompositedPropertyMap = function(target) {
@@ -2743,56 +3550,50 @@ CompositedPropertyMap.prototype = {
     if (!(property in this.properties)) {
       this.properties[property] = [];
     }
-    if (!(animValue instanceof AnimatedResult)) {
-      throw new TypeError('expected AnimatedResult');
+    if (!(animValue instanceof CompositableValue)) {
+      throw new TypeError('expected CompositableValue');
     }
     this.properties[property].push(animValue);
   },
   applyAnimatedValues: function() {
     for (var property in this.properties) {
-      var resultList = this.properties[property];
-      if (resultList.length > 0) {
-        var i;
-        for (i = resultList.length - 1; i >= 0; i--) {
-          if (resultList[i].operation == 'replace') {
-            break;
-          }
-        }
-        // the baseValue will either be retrieved after clearing the value or
-        // will be overwritten by a 'replace'.
-        var baseValue = undefined;
-        if (i == -1) {
-          clearValue(this.target, property);
-          baseValue = fromCssValue(property, getValue(this.target, property));
-          i = 0;
-        }
-        for ( ; i < resultList.length; i++) {
-          var inValue = resultList[i].value;
-          switch (resultList[i].operation) {
-          case 'replace':
-            baseValue = inValue;
-            continue;
-          case 'add':
-            baseValue = add(property, baseValue, inValue);
-            continue;
-          case 'merge':
-            baseValue = interpolate(property, baseValue, inValue,
-                resultList[i].fraction);
-            continue;
-          }
-        }
-        var svgMode = propertyIsSVGAttrib(property, this.target);
-        setValue(this.target, property, toCssValue(property, baseValue,
-            svgMode));
-        this.properties[property] = [];
-      } else {
+      var valuesToComposite = this.properties[property];
+      if (valuesToComposite.length === 0) {
         // property has previously been set but no value was accumulated
         // in this animation iteration. Reset value and stop tracking.
         clearValue(this.target, property);
         delete this.properties[property];
+        continue;
       }
+      var i = valuesToComposite.length - 1;
+      for ( ; i >= 0; i--) {
+        if (!valuesToComposite[i].dependsOnUnderlyingValue()) {
+          break;
+        }
+      }
+      // the baseValue will either be retrieved after clearing the value or
+      // will be overwritten by a 'replace'.
+      var baseValue = undefined;
+      if (i === -1) {
+        clearValue(this.target, property);
+        baseValue = fromCssValue(property, getValue(this.target, property));
+        // TODO: Decide what to do with elements not in the DOM.
+        console.assert(isDefinedAndNotNull(baseValue) && baseValue !== '',
+            'Base value should always be set. ' +
+            'Is the target element in the DOM?');
+        i = 0;
+      }
+      for ( ; i < valuesToComposite.length; i++) {
+        baseValue = valuesToComposite[i].compositeOnto(property, baseValue);
+      }
+      console.assert(isDefinedAndNotNull(baseValue) && baseValue !== '',
+          'Value should always be set after compositing');
+      var isSvgMode = propertyIsSVGAttrib(property, this.target);
+      setValue(this.target, property, toCssValue(property, baseValue,
+          isSvgMode));
+      this.properties[property] = [];
     }
-  }
+  },
 };
 
 /** @constructor */
@@ -2802,11 +3603,13 @@ var Compositor = function() {
 
 Compositor.prototype = {
   setAnimatedValue: function(target, property, animValue) {
-    if (target._anim_properties === undefined) {
-      target._anim_properties = new CompositedPropertyMap(target);
-      this.targets.push(target);
+    if (target !== null) {
+      if (target._anim_properties === undefined) {
+        target._anim_properties = new CompositedPropertyMap(target);
+        this.targets.push(target);
+      }
+      target._anim_properties.addValue(property, animValue);
     }
-    target._anim_properties.addValue(property, animValue);
   },
   applyAnimatedValues: function() {
     for (var i = 0; i < this.targets.length; i++) {
@@ -2863,7 +3666,7 @@ var initializeIfSVGAndUninitialized = function(property, target) {
 
 var setValue = function(target, property, value) {
   initializeIfSVGAndUninitialized(property, target);
-  if (property == "transform") {
+  if (property === "transform") {
     property = features.transformProperty;
   }
   if (propertyIsSVGAttrib(property, target)) {
@@ -2989,42 +3792,70 @@ if (document.readyState == 'complete') {
   addEventListener('load', function() {
     load();
     if (usePerformanceTiming) {
-      // We use setTimeout() to clear cachedDocumentTimeMillis at the end of a
+      // We use setTimeout() to clear cachedClockTimeMillis at the end of a
       // frame, but this will not run until after other load handlers. We need
       // those handlers to pick up the new value of clockMillis(), so we must
       // clear the cached value.
-      cachedDocumentTimeMillis = undefined;
+      cachedClockTimeMillis = undefined;
     }
   });
 }
 
 // A cached document time for use during the current callstack.
-var cachedDocumentTimeMillis = undefined;
+var cachedClockTimeMillis = undefined;
 // Calculates one time relative to another, returning null if the zero time is
 // undefined.
 var relativeTime = function(time, zeroTime) {
   return isDefined(zeroTime) ? time - zeroTime : null;
 }
 
-var documentTime = function() {
+var cachedClockTime = function() {
   // Cache a document time for the remainder of this callstack.
-  if (!isDefined(cachedDocumentTimeMillis)) {
-    cachedDocumentTimeMillis =
-        relativeTime(clockMillis(), documentTimeZeroAsClockTime);
-    setTimeout(function() { cachedDocumentTimeMillis = undefined; }, 0);
+  if (!isDefined(cachedClockTimeMillis)) {
+    cachedClockTimeMillis = clockMillis();
+    setTimeout(function() { cachedClockTimeMillis = undefined; }, 0);
   }
-  return cachedDocumentTimeMillis === null ?
-      null : cachedDocumentTimeMillis / 1000;
+  return cachedClockTimeMillis / 1000;
 };
 
-var ticker = function(rafTime) {
+
+// These functions should be called in every stack that could possibly modify
+// the effect results that have already been calculated for the current tick.
+var modifyCurrentAnimationStateDepth = 0;
+var enterModifyCurrentAnimationState = function() {
+  modifyCurrentAnimationStateDepth++;
+};
+var exitModifyCurrentAnimationState = function(shouldRepeat) {
+  modifyCurrentAnimationStateDepth--;
+  // shouldRepeat is set false when we know we can't possibly affect the current
+  // state (eg. a TimedItem which is not attached to a player). We track the
+  // depth of recursive calls trigger just one repeat per entry. Only the value
+  // of shouldRepeat from the outermost call is considered, this allows certain
+  // locatations (eg. constructors) to override nested calls that would
+  // otherwise set shouldRepeat unconditionally.
+  if (modifyCurrentAnimationStateDepth == 0 && shouldRepeat) {
+    repeatLastTick();
+  }
+};
+
+var repeatLastTick = function() {
+  if (isDefined(lastTickTime)) {
+    ticker(lastTickTime, true);
+  }
+};
+
+var lastTickTime;
+var ticker = function(rafTime, isRepeat) {
   // Don't tick till the page is loaded....
   if (!isDefined(documentTimeZeroAsRafTime)) {
     raf(ticker);
     return;
   }
 
-  cachedDocumentTimeMillis = relativeTime(rafTime, documentTimeZeroAsRafTime);
+  if (!isRepeat) {
+    lastTickTime = rafTime;
+    cachedClockTimeMillis = rafTime;
+  }
 
   // Get animations for this sample. We order first by Player start time, and
   // second by DFS order within each Player's tree.
@@ -3036,6 +3867,7 @@ var ticker = function(rafTime) {
   var paused = true;
   var animations = [];
   sortedPlayers.forEach(function(player) {
+    player._hasTicked = true;
     player._update();
     finished = finished && player._isPastEndOfActiveInterval();
     paused = paused && player.paused;
@@ -3049,20 +3881,22 @@ var ticker = function(rafTime) {
     }
   }
 
+  // Generate events
+  sortedPlayers.forEach(function(player) {
+    player._generateEvents();
+  });
+
   // Composite animated values into element styles
   compositor.applyAnimatedValues();
 
-  if (window.webAnimVisUpdateAnims) {
-    webAnimVisUpdateAnims();
+  if (!isRepeat) {
+    if (finished || paused) {
+      rafScheduled = false;
+    } else {
+      raf(ticker);
+    }
+    cachedClockTimeMillis = undefined;
   }
-
-  if (finished || paused) {
-    rafScheduled = false;
-  } else {
-    raf(ticker);
-  }
-
-  cachedDocumentTimeMillis = undefined;
 };
 
 // Multiplication where zero multiplied by any value (including infinity)
@@ -3087,25 +3921,37 @@ window.Element.prototype.animate = function(effect, timing) {
   DOCUMENT_TIMELINE.play(anim);
   return anim;
 };
+window.Element.prototype.getCurrentPlayers = function() {
+  return PLAYERS.filter((function(player) {
+    return player._isCurrent() && player._isTargetingElement(this);
+  }).bind(this));
+};
+window.Element.prototype.getCurrentAnimations = function() {
+  var animations = [];
+  PLAYERS.forEach((function(player) {
+    if (player._isCurrent()) {
+      player._getAnimationsTargetingElement(this, animations);
+    }
+  }).bind(this));
+  return animations;
+};
 
 window.Animation = Animation;
 window.AnimationEffect = AnimationEffect;
-window.GroupedAnimationEffect = GroupedAnimationEffect;
-window.HierarchyRequestError = new HierarchyRequestError;
-window.Keyframe = Keyframe;
 window.KeyframeAnimationEffect = KeyframeAnimationEffect;
-window.KeyframeList = KeyframeList;
 window.MediaReference = MediaReference;
 window.ParGroup = ParGroup;
 window.PathAnimationEffect = PathAnimationEffect;
 window.Player = Player;
+window.PseudoElementReference = PseudoElementReference;
 window.SeqGroup = SeqGroup;
-window.SplineTimingFunction = SplineTimingFunction;
-window.StepTimingFunction = StepTimingFunction;
 window.TimedItem = TimedItem;
+window.TimedItemList = TimedItemList;
+window.Timing = Timing;
 window.Timeline = Timeline;
-window.TimingEvent = null; // TODO
-window.TimingFunction = TimingFunction;
+window.TimingEvent = TimingEvent;
 window.TimingGroup = TimingGroup;
+
+window._WebAnimationsTestingUtilities = { _constructorToken : constructorToken }
 
 })();

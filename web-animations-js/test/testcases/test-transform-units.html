@@ -31,13 +31,11 @@ limitations under the License.
   background-color: red;
 }
 </style>
-<div></div>
 <div style="height: 400px"></div>
-<script src="../testharness_bootstrap.js"></script>
-<script src="../../web-animations.js"></script>
+<script src="../bootstrap.js"></script>
 <script>
 "use strict";
-// TODO: refactor into test harness
+
 function detectFeatures() {
   var style = document.createElement('style');
   style.textContent = '' +
@@ -97,8 +95,10 @@ for (var i = 0; i < transformValues.length; i++) {
       div.style.top = y + 'px';
       div.style.left = x + 'px';
       div.id = "i" + i + "_" + j + "_" + k
-      animations.push(new Animation(div, {"transform":
-          [transformValues[i][j], transformValues[i][k]]}, 2));
+      animations.push(new Animation(div, [
+        {transform: transformValues[i][j]},
+        {transform: transformValues[i][k]},
+      ], 2));
       x += separation_x;
       if (x > max_x) {
         x = 20;
@@ -108,8 +108,6 @@ for (var i = 0; i < transformValues.length; i++) {
   }
   y += separation_y;
 }
-</script>
-<script>
-"use strict";
+
 animations.forEach(function(anim) { document.timeline.play(anim); });
 </script>

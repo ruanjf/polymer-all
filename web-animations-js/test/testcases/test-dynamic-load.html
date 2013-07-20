@@ -40,20 +40,26 @@ limitations under the License.
 <div id="a" class="anim"></div>
 <div id="a-expected" style="top: 50px; left: 200px;" class="expected"></div>
 
-<script src="../testharness_bootstrap.js"></script>
+<script src="../bootstrap.js" nopolyfill nochecks></script>
 <script>
-  "use strict";
-  animTestRunner.waitUntilDone();
-  window.addEventListener('load', function() {
-    var s = document.createElement('script');
-    s.src = "../../web-animations.js";
-    s.addEventListener('load', function() {
-      document.timeline.play(new Animation(a,
-        {"left": ["0px", "200px"]},
-        0.5
-      ));  
-      animTestRunner.done();
-    })
-    document.head.appendChild(s);
-  });
+"use strict";
+
+timing_test(function() {
+    at(0.00, function() { assert_styles(".anim", {"left": "0px"}) });
+    at(0.25, function() { assert_styles(".anim", {"left": "100px"}) });
+    at(0.50, function() { assert_styles(".anim", {"left": "200px"}) });
+  }, "Check left position");
+
+window.addEventListener('load', function() {
+  var s = document.createElement('script');
+  s.src = "../../web-animations.js";
+  s.addEventListener('load', function() {
+    document.timeline.play(new Animation(a,
+      [{left: "0px"}, {left: "200px"}],
+      0.5
+    ));
+
+  })
+  document.head.appendChild(s);
+});
 </script>
